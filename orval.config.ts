@@ -3,6 +3,8 @@ import { defineConfig } from 'orval';
 // Same orval setup and pinned version as PatrolTech's internal SDK, fed only
 // with the public contract. Do not bump orval without checking that every
 // operation of the contract is still generated (see src/contract.spec.ts).
+// `npm run generate` then percent-encodes path parameters
+// (scripts/encode-path-params.mjs).
 export default defineConfig({
   patroltech: {
     input: {

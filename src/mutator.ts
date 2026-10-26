@@ -87,23 +87,24 @@ function resolveDefaultHeaders(cfg: ApiSdkConfig): Record<string, string> {
 }
 
 /**
- * The generated client interpolates path parameters as they are, and URL parsing
- * resolves `.`/`..` segments (also as `%2e`) and treats `\` as `/`. Refusing them
- * keeps an untrusted id (`../other`) from sending the caller's token to another
- * endpoint of the API.
+ * The generated client percent-encodes path parameters
+ * (`scripts/encode-path-params.mjs`), but `.` and `..` survive the encoding and
+ * URL parsing resolves them (also as `%2e`). Refusing them, plus backslashes and
+ * control characters that URL parsing rewrites or drops, keeps an untrusted id
+ * (`..`) from sending the caller's token to another endpoint of the API.
  */
-function assertNoDotSegments(url: string): void {
+function assertSafePath(url: string): void {
   const path = url.split(/[?#]/, 1)[0];
   const hasDotSegment = path
     .split('/')
     .some((segment) => ['.', '..'].includes(segment.toLowerCase().replace(/%2e/g, '.')));
-  if (hasDotSegment || path.includes('\\')) {
-    throw new TypeError(`Refusing request path with dot segments or backslashes: ${path}`);
+  if (hasDotSegment || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) {
+    throw new TypeError(`Refusing an unsafe request path: ${JSON.stringify(path)}`);
   }
 }
 
 async function doFetch(url: string, options?: SdkRequestInit): Promise<Response> {
-  assertNoDotSegments(url);
+  assertSafePath(url);
   const cfg = resolveConfig(options);
   const fetchImpl = cfg.fetchImpl ?? fetch;
   const { skipSessionAuth, apiConfig: _apiConfig, ...requestInit } = options ?? {};
