@@ -1,0 +1,5575 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PatrolTech Public API",
+    "version": "1.0.0",
+    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope."
+  },
+  "servers": [
+    {
+      "url": "https://api.patroltech.online"
+    }
+  ],
+  "paths": {
+    "/api/routes": {
+      "get": {
+        "operationId": "listRoutes",
+        "summary": "List routes by organization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "locationId",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeArchived",
+            "required": false,
+            "description": "`true` also lists the archived routes (#1283). By default they are left out.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated routes list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRoutesList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Location not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/{routeId}/checkpoints/{checkpointId}": {
+      "post": {
+        "operationId": "addCheckpointToRoute",
+        "summary": "Add checkpoint to route",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "checkpointId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCheckpointToRouteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Checkpoint added to route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteCheckpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`code: CHECKPOINT_NOT_IN_ROUTE_LOCATION`: the checkpoint is not on the route's location (or does not exist). `code: CHECKPOINT_ARCHIVED` (`data.checkpointIds`): the checkpoint is archived."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeCheckpointFromRoute",
+        "summary": "Remove checkpoint from route",
+        "description": "The rounds in progress on the route are cancelled. Removing its last checkpoint deactivates the route (`isActive: false`): an empty route cannot be patrolled. Adding checkpoints back does not reactivate it.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "checkpointId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Checkpoint removed from route"
+          }
+        }
+      }
+    },
+    "/api/routes/{routeId}/timewindows": {
+      "post": {
+        "operationId": "addTimeWindowToRoute",
+        "summary": "Add time window to route",
+        "description": "**TIMEZONE CONTRACT**: `startTime`/`endTime` are UTC `HH:MM` and `days`\nare ISO weekdays in UTC. The client converts local time → UTC before\nsending; the backend never converts them.\n\nSend `timezone` (IANA, e.g. \"Europe/Madrid\") with the zone the times\nwere converted from: the backend stores it with the current UTC offset\nand re-projects the UTC times at every DST change so the window keeps\nits local time. Without it the window is never realigned. If the route\nalready has a stored zone, that one wins and the window's `timezone` is\nignored.\n",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTimeWindowBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Time window added to route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteTimeWindow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The new window overlaps one the route already has (#978): `code` is `TIME_WINDOWS_OVERLAP` and `data.windows` carries both conflicting windows (UTC). Also returned when `timezone` is not a valid IANA zone, as a plain error whose `message` is `Invalid timezone: <zone>` (no `code`). Nothing is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeWindowsOverlapResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/{id}/details": {
+      "get": {
+        "operationId": "getRouteWithDetails",
+        "summary": "Get route with checkpoints and time windows",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Route details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteWithDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Route not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/complete": {
+      "post": {
+        "operationId": "createRouteComplete",
+        "summary": "Create route with checkpoints and time windows",
+        "description": "Created active when it has checkpoints; without them (`checkpoints` empty or omitted) it is created inactive, whatever the body says: a route without checkpoints cannot be active.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteFormBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Route created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteWithDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Two of the submitted time windows overlap (#978). Nothing is created; `data.windows` carries both conflicting windows (UTC). Also returned, with `code: CHECKPOINT_NOT_IN_ROUTE_LOCATION` and `data: null`, when a checkpoint is not on the route's location, and with `code: CHECKPOINT_ARCHIVED` and `data.checkpointIds` when a checkpoint is archived.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeWindowsOverlapResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`code: LOCATION_ARCHIVED`: the location is archived (#1283). Nothing is created; restore the location first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteArchiveConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/{routeId}/rounds": {
+      "get": {
+        "operationId": "getRouteRounds",
+        "summary": "Get route rounds with pagination",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Route rounds page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteRounds"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/{routeId}/rounds/{roundId}/checkpoints": {
+      "get": {
+        "operationId": "getRouteRoundCheckpoints",
+        "summary": "Get the per-checkpoint scan breakdown for a route round",
+        "description": "Lists every checkpoint of the route (in route order) and whether it\nwas scanned during this specific round, with the scan time when it\nwas. Checkpoints are matched to scans by their POSITION in the route\n(`order`), not by checkpoint id — a checkpoint can occupy more than\none slot in an ordered route.\n",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "roundId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-checkpoint round breakdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRouteRoundCheckpoints"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Round or route not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/routes/{id}/active": {
+      "patch": {
+        "operationId": "toggleRouteActive",
+        "summary": "Toggle route active state",
+        "description": "A route without checkpoints cannot be activated (400 `ROUTE_HAS_NO_CHECKPOINTS`), nor an archived one (409 `ROUTE_ARCHIVED`: unarchive it first); deactivating it is always allowed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleRouteActiveBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Route updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`code: ROUTE_HAS_NO_CHECKPOINTS`: the route has no checkpoints and cannot be activated. Nothing is changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Route not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`code: ROUTE_ARCHIVED`: the route is archived and cannot be activated. Nothing is changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteArchiveConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/user/preferences": {
+      "patch": {
+        "operationId": "updateUserPreferences",
+        "summary": "Update user preferences",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePreferencesBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatePreferencesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid language code"
+          },
+          "403": {
+            "description": "meta.errorCode AGENT_CANNOT_CHANGE_IDENTITY: una sesión de agente MCP (via: 'mcp') no cambia los teléfonos de la cuenta (phone, whatsappPhone); solo la sesión del propio usuario. No se cambió nada (solo si el body trae whatsappPhone)"
+          }
+        }
+      }
+    },
+    "/api/organizations/users": {
+      "get": {
+        "operationId": "getOrganizationUsers",
+        "summary": "List users in an organization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgUsersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Organization ID is required"
+          },
+          "403": {
+            "description": "No access to this organization"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organizationId}/support-summary": {
+      "get": {
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "operationId": "getOrganizationSupportSummary",
+        "summary": "Org-scoped support summary: rounds by status in a window, patroller headcount, checkpoint count and suspicious scans",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "exclusiveMinimum": true,
+              "maximum": 365
+            },
+            "required": false,
+            "name": "windowDays",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregated support summary for the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid windowDays"
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "No VIEWER access to this organization"
+          }
+        }
+      }
+    },
+    "/api/checkpoints": {
+      "get": {
+        "operationId": "listCheckpoints",
+        "summary": "List checkpoints for a location",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "qr_static",
+                "nfc_uid",
+                "manual_code",
+                "geofence",
+                "nfc_sun",
+                "nfc_url_signed",
+                "ble_beacon",
+                "iot_button",
+                "photo_evidence",
+                "qr_dynamic"
+              ]
+            },
+            "required": false,
+            "name": "methodType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            },
+            "required": false,
+            "name": "includeArchived",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoints retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCheckpointsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Location ID is required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCheckpoint",
+        "summary": "Create a checkpoint",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckpointBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Checkpoint created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VERIFICATION_TYPE_RETIRED: the inline method is `manual_code`, which can no longer be created (#1301). Also VALIDATION_ERROR for a malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationTypeRetired"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERIFICATION_CODE_TAKEN: the chosen code is already used by a live checkpoint of the organization (body below). Also EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED on paid plans when the checkpoint adds a charge that needs confirming (`confirmExtraBilling`). LOCATION_ARCHIVED when its location is archived (#1283): nothing is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VerificationCodeTaken"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CheckpointLocationArchivedConflict"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid verificationMethod config for its type (e.g. a qr_static code over 1000 bytes) or a type not implemented yet"
+          }
+        }
+      }
+    },
+    "/api/checkpoints/{id}": {
+      "put": {
+        "operationId": "updateCheckpoint",
+        "summary": "Update a checkpoint",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCheckpointBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkpoint updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checkpoint not found"
+          }
+        }
+      }
+    },
+    "/api/qr-sheets/{token}": {
+      "get": {
+        "operationId": "downloadQrSheet",
+        "summary": "Download the QR sheet PDF of a signed link",
+        "description": "No Authorization header: the link is the credential. The sheet is rebuilt from the checkpoints as they are now, and the user the link was issued to must still be an active EDITOR of the location.",
+        "security": [],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "token",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF, inline, not cacheable",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "QR_SHEET_ACCESS_REVOKED: the user is no longer active or no longer an EDITOR of the location (errorCode in the response metadata)"
+          },
+          "410": {
+            "description": "QR_SHEET_LINK_INVALID: tampered, forged, expired, malformed or unknown link, always the same answer (errorCode in the response metadata)"
+          },
+          "422": {
+            "description": "NO_PRINTABLE_CHECKPOINTS: nothing printable is left; or QR_SHEET_TOO_LARGE: the location now has more than 600 printable checkpoints (errorCode in the response metadata)"
+          },
+          "423": {
+            "description": "ORGANIZATION_SUSPENDED: the organization of the location is suspended. Same body as the panel 423; the link carries no session, so the suspension is checked here."
+          },
+          "429": {
+            "description": "Too many downloads: 30 per minute per IP and 10 per minute per user; errorCode RATE_LIMITED"
+          }
+        }
+      }
+    },
+    "/api/features/access-control/access-logs": {
+      "get": {
+        "operationId": "listAccessLogs",
+        "summary": "List access history for a location",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "zone",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ENTRY",
+                "EXIT"
+              ]
+            },
+            "required": false,
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "authorizedPersonId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Access history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessLogsListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/features/access-control/access-logs/active": {
+      "get": {
+        "operationId": "getActiveEntries",
+        "summary": "Get currently active entries (not yet exited)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "zone",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveEntriesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/features/incident-reporting/incidents": {
+      "get": {
+        "operationId": "listIncidents",
+        "summary": "List incidents with optional filters",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ]
+            },
+            "required": false,
+            "name": "priority",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "reportedByPatrollerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "categoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "checkpointId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "priority",
+                "status"
+              ],
+              "default": "createdAt"
+            },
+            "required": false,
+            "name": "sortBy",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ASC",
+                "DESC"
+              ],
+              "default": "DESC"
+            },
+            "required": false,
+            "name": "sortOrder",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Incidents list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentsListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/features/incident-reporting/incidents/{id}": {
+      "get": {
+        "operationId": "getIncidentDetail",
+        "summary": "Get full incident detail including timeline and media",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Incident detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Incident not found"
+          }
+        }
+      }
+    },
+    "/api/features/incident-reporting/incidents/{id}/status": {
+      "patch": {
+        "operationId": "updateIncidentStatus",
+        "summary": "Update the status of an incident",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIncidentStatusBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "updated"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status transition or missing required comment"
+          },
+          "404": {
+            "description": "Incident not found"
+          }
+        }
+      }
+    },
+    "/api/features/incident-reporting/incidents/{id}/comments": {
+      "post": {
+        "operationId": "addIncidentComment",
+        "summary": "Add a comment to an incident",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddIncidentCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentTimelineEntryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Incident not found"
+          }
+        }
+      }
+    },
+    "/api/features/incident-reporting/incidents/{id}/assign": {
+      "patch": {
+        "operationId": "assignIncident",
+        "summary": "Assign or unassign an incident to a user",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignIncidentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Incident assigned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "updated"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or meta.errorCode ASSIGNEE_NOT_IN_ORGANIZATION: the assignee has no role in the incident's organization (#1312)"
+          },
+          "404": {
+            "description": "Incident not found"
+          }
+        }
+      }
+    },
+    "/api/licenses/organization/{organizationId}": {
+      "get": {
+        "operationId": "getLicenseInfo",
+        "summary": "Licencia, tier, consumo y opciones de upgrade de una organización",
+        "description": "Abierto a VIEWER: límites y consumo son datos operativos. Los identificadores de Stripe y `billingCountry`/`currencyFixed` (datos de facturación) se omiten para quien no llega a EDITOR. `billing` (si factura, cada cuánto y en qué moneda) llega a todos: `currency` es la moneda en la que se PRECIA a la organización (también si aún no paga) y `billing.currency`, la de la suscripción que paga.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Información de la licencia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLicenseInfoResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NO_LICENSE — la organización no tiene licencia"
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "operationId": "getOAuthAuthorizationServerMetadata",
+        "summary": "OAuth authorization server metadata (RFC 8414)",
+        "responses": {
+          "200": {
+            "description": "Server metadata; 404 when OAuth is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationServerMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/jwks.json": {
+      "get": {
+        "operationId": "getOAuthJwks",
+        "summary": "Public keys that verify the access tokens",
+        "responses": {
+          "200": {
+            "description": "JWK set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthJwks"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize": {
+      "get": {
+        "operationId": "startOAuthAuthorization",
+        "summary": "Start the authorization code flow with PKCE S256",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            },
+            "required": true,
+            "name": "response_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "client_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "redirect_uri",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code_challenge",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "S256"
+              ]
+            },
+            "required": true,
+            "name": "code_challenge_method",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "resource",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "To the consent screen; once the client is trusted, a CIMD client gets its errors at its `redirect_uri` with `error`, `state` and `iss`"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`server_error`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/register": {
+      "post": {
+        "operationId": "registerOAuthClient",
+        "summary": "Dynamic registration of a public client (RFC 7591)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRegisterClientRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered client metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthRegisterClientResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_redirect_uri` or `invalid_client_metadata`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`server_error`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "operationId": "requestOAuthToken",
+        "summary": "Exchange an authorization code (PKCE) or rotate a refresh token",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthTokenRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RFC 6749 §5.2 error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`server_error`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/revoke": {
+      "post": {
+        "operationId": "revokeOAuthToken",
+        "summary": "Revoke a token (RFC 7009)",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRevokeRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked, or unknown token (no body)"
+          },
+          "400": {
+            "description": "`invalid_request`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`server_error`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/agent-session": {
+      "post": {
+        "operationId": "createOAuthAgentSession",
+        "summary": "Exchange an OAuth access token for a short-lived user JWT (`via: mcp`) that calls `/api`",
+        "security": [
+          {
+            "oauthAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User session for the agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAgentSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_token`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`server_error`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "OAuth disabled on this server (`temporarily_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locations": {
+      "get": {
+        "operationId": "listLocations",
+        "summary": "List locations for an organization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` also lists the archived locations (#1283). By default they are left out."
+            },
+            "required": false,
+            "description": "`true` also lists the archived locations (#1283). By default they are left out.",
+            "name": "includeArchived",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locations retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLocationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Organization ID is required"
+          }
+        }
+      }
+    },
+    "/api/locations/{id}": {
+      "put": {
+        "operationId": "updateLocation",
+        "summary": "Update a location",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLocationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Location not found"
+          }
+        }
+      }
+    },
+    "/api/patrollers": {
+      "get": {
+        "operationId": "listPatrollers",
+        "summary": "List patrollers for an organization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeArchived",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patrollers retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPatrollersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "organizationId is required"
+          },
+          "403": {
+            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+          },
+          "404": {
+            "description": "Location not found"
+          }
+        }
+      }
+    },
+    "/api/patrollers/{id}": {
+      "put": {
+        "operationId": "updatePatroller",
+        "summary": "Update a patroller",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePatrollerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Patroller updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatrollerResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patroller not found"
+          }
+        }
+      }
+    },
+    "/api/scans": {
+      "get": {
+        "operationId": "listScans",
+        "summary": "List scans for an organization with optional filters",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "checkpoint",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "patroller",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "nullable": true,
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "dateFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "nullable": true,
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "dateTo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "flagged",
+                "clean"
+              ]
+            },
+            "required": false,
+            "name": "fraudStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "counted",
+                "verified",
+                "pending_review",
+                "rejected"
+              ],
+              "description": "`counted` = every scan except `rejected` (what the round and the scan certificate count); also applies to rows redacted by retention, which carry no status"
+            },
+            "required": false,
+            "description": "`counted` = every scan except `rejected` (what the round and the scan certificate count); also applies to rows redacted by retention, which carry no status",
+            "name": "validationStatus",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scans retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListScansResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Organization ID is required"
+          },
+          "403": {
+            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+          },
+          "404": {
+            "description": "Location not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiSuccessRoutesList": {
+        "$ref": "#/components/schemas/PaginatedRoutes"
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "errorCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ]
+      },
+      "AddCheckpointToRouteBody": {
+        "type": "object",
+        "required": [
+          "order"
+        ],
+        "properties": {
+          "order": {
+            "type": "integer"
+          }
+        }
+      },
+      "ApiSuccessRouteCheckpoint": {
+        "$ref": "#/components/schemas/RouteCheckpoint"
+      },
+      "AddTimeWindowBody": {
+        "type": "object",
+        "required": [
+          "startTime",
+          "endTime",
+          "days"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone the window was configured in (e.g. \"Europe/Madrid\"). Times stay UTC; this records which local time they came from so the backend can re-project them when the offset changes (DST)."
+          }
+        }
+      },
+      "ApiSuccessRouteTimeWindow": {
+        "$ref": "#/components/schemas/RouteTimeWindow"
+      },
+      "TimeWindowsOverlapResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "code",
+          "data"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "TIME_WINDOWS_OVERLAP"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "code",
+              "windows"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "TIME_WINDOWS_OVERLAP"
+                ]
+              },
+              "windows": {
+                "type": "array",
+                "description": "The two conflicting windows (UTC), in the order they were checked.",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "$ref": "#/components/schemas/AddTimeWindowBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ApiSuccessRouteWithDetails": {
+        "$ref": "#/components/schemas/RouteWithDetails"
+      },
+      "RouteFormBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "locationId",
+          "requiresOrderedScan"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scheduleTimezone": {
+            "type": "string",
+            "description": "IANA timezone the route schedule is expressed in, chosen by the user. Takes precedence over the stored one and over each window timezone: only a client that converted the times with it sends this field."
+          },
+          "name": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "locationId": {
+            "type": "string"
+          },
+          "requiresOrderedScan": {
+            "type": "boolean"
+          },
+          "guardMode": {
+            "$ref": "#/components/schemas/RouteGuardMode"
+          },
+          "scheduleMode": {
+            "$ref": "#/components/schemas/RouteScheduleMode"
+          },
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "checkpointId",
+                "order"
+              ],
+              "properties": {
+                "checkpointId": {
+                  "type": "string"
+                },
+                "order": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "timeWindows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddTimeWindowBody"
+            }
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "description": "The `version` the client loaded. If stale, the update is rejected with 409 so a concurrent edit is never silently overwritten."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Update only (ignored on create: a new route is active when it has checkpoints). A route without checkpoints cannot be active: saved with an empty list it is deactivated, and activating one without sending checkpoints is refused with 400 `ROUTE_HAS_NO_CHECKPOINTS`. Anything but a boolean is refused with 400."
+          }
+        }
+      },
+      "RouteArchiveConflict": {
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "code",
+          "data"
+        ],
+        "description": "409 of creating, updating, deleting, archiving, unarchiving or activating a route (#1283). `code` is at the top level; LOCATION_ARCHIVED means the location of the route, or the one an update assigns to a route without one (#1318), is archived.",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "ROUTE_HAS_HISTORY",
+              "ROUTE_ALREADY_ARCHIVED",
+              "ROUTE_NOT_ARCHIVED",
+              "ROUTE_ARCHIVED",
+              "LOCATION_ARCHIVED"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "nullable": true
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiSuccessRouteRounds": {
+        "$ref": "#/components/schemas/RouteRoundsPage"
+      },
+      "ApiSuccessRouteRoundCheckpoints": {
+        "type": "object",
+        "required": [
+          "roundId",
+          "routeId",
+          "status",
+          "scannedCount",
+          "totalCount",
+          "checkpoints"
+        ],
+        "properties": {
+          "roundId": {
+            "type": "string"
+          },
+          "routeId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "scannedCount": {
+            "type": "integer"
+          },
+          "totalCount": {
+            "type": "integer"
+          },
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteRoundCheckpointItem"
+            }
+          },
+          "redacted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ToggleRouteActiveBody": {
+        "type": "object",
+        "required": [
+          "isActive"
+        ],
+        "properties": {
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ApiSuccessRoute": {
+        "$ref": "#/components/schemas/Route"
+      },
+      "UpdatePreferencesBody": {
+        "type": "object",
+        "properties": {
+          "preferredLanguage": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en",
+              "fr"
+            ]
+          },
+          "preferredTimezone": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "notificationPreferences": {
+            "type": "object",
+            "properties": {
+              "channels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "whatsappPhone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              },
+              {
+                "nullable": true
+              }
+            ]
+          }
+        }
+      },
+      "UpdatePreferencesResponse": {
+        "type": "object",
+        "properties": {
+          "preferredLanguage": {
+            "type": "string"
+          },
+          "preferredTimezone": {
+            "type": "string",
+            "nullable": true
+          },
+          "notificationPreferences": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "channels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "required": [
+              "channels"
+            ]
+          },
+          "whatsappPhone": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "preferredLanguage",
+          "preferredTimezone",
+          "notificationPreferences",
+          "whatsappPhone"
+        ]
+      },
+      "OrgUsersResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "phone": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "lastLogin": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "UserRoles": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "roleType": {
+                        "type": "string"
+                      },
+                      "roleScope": {
+                        "type": "string"
+                      },
+                      "scopeId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "roleType",
+                      "roleScope",
+                      "scopeId"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email"
+              ]
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ]
+      },
+      "SupportSummary": {
+        "type": "object",
+        "properties": {
+          "rounds": {
+            "type": "object",
+            "properties": {
+              "windowDays": {
+                "type": "integer"
+              },
+              "inProgress": {
+                "type": "integer"
+              },
+              "completed": {
+                "type": "integer"
+              },
+              "incomplete": {
+                "type": "integer"
+              },
+              "expired": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "windowDays",
+              "inProgress",
+              "completed",
+              "incomplete",
+              "expired"
+            ]
+          },
+          "patrollers": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "active": {
+                "type": "integer"
+              },
+              "inactive": {
+                "type": "integer"
+              },
+              "alert": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total",
+              "active",
+              "inactive",
+              "alert"
+            ]
+          },
+          "checkpoints": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total"
+            ]
+          },
+          "suspiciousScans": {
+            "type": "object",
+            "properties": {
+              "windowDays": {
+                "type": "integer"
+              },
+              "flagged": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "windowDays",
+              "flagged"
+            ]
+          }
+        },
+        "required": [
+          "rounds",
+          "patrollers",
+          "checkpoints",
+          "suspiciousScans"
+        ]
+      },
+      "ListCheckpointsResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "category": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "tags": {
+                  "type": "array",
+                  "nullable": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "latitude": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "longitude": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "locationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "qrCode": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "organizationId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "fraudRules": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "gpsProximity": {
+                      "type": "object",
+                      "properties": {
+                        "maxDistanceMeters": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "maxAccuracyMeters": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        }
+                      },
+                      "required": [
+                        "maxDistanceMeters"
+                      ]
+                    },
+                    "undergroundMode": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled"
+                      ]
+                    }
+                  }
+                },
+                "verificationMethod": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "qr_static",
+                        "nfc_uid",
+                        "manual_code",
+                        "geofence",
+                        "nfc_sun",
+                        "nfc_url_signed",
+                        "ble_beacon",
+                        "iot_button",
+                        "photo_evidence",
+                        "qr_dynamic"
+                      ]
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "securityLevel": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "config": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      }
+                    },
+                    "provisioningStatus": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "key_generated",
+                        "chip_assigned",
+                        "provisioned",
+                        "failed",
+                        "revoked"
+                      ]
+                    },
+                    "provisionedAt": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "lastProvisioningError": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "active",
+                    "securityLevel",
+                    "config",
+                    "provisioningStatus",
+                    "provisionedAt",
+                    "lastProvisioningError"
+                  ]
+                },
+                "firstScanAt": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "date-time"
+                },
+                "archivedAt": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "date-time"
+                },
+                "supersededById": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "isLocked": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "locationId"
+              ]
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ]
+      },
+      "CreateCheckpointBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "fraudRules": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "gpsProximity": {
+                "type": "object",
+                "properties": {
+                  "maxDistanceMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "maxAccuracyMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                },
+                "required": [
+                  "maxDistanceMeters"
+                ]
+              },
+              "undergroundMode": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "verificationMethod": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "qr_static",
+                  "nfc_uid",
+                  "manual_code",
+                  "geofence",
+                  "nfc_sun",
+                  "nfc_url_signed",
+                  "ble_beacon",
+                  "iot_button",
+                  "photo_evidence",
+                  "qr_dynamic"
+                ]
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "securityLevel": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                },
+                "description": "Per-type config. For `qr_static` and `manual_code`, `code` is a non-empty string; a `qr_static` code is printed as a QR, so it is at most 1000 bytes of UTF-8 once trimmed (longer is a config validation error)."
+              }
+            },
+            "required": [
+              "type",
+              "config"
+            ]
+          },
+          "confirmExtraBilling": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "locationId"
+        ]
+      },
+      "CheckpointResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "qrCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "fraudRules": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "gpsProximity": {
+                "type": "object",
+                "properties": {
+                  "maxDistanceMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "maxAccuracyMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                },
+                "required": [
+                  "maxDistanceMeters"
+                ]
+              },
+              "undergroundMode": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "verificationMethod": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "qr_static",
+                  "nfc_uid",
+                  "manual_code",
+                  "geofence",
+                  "nfc_sun",
+                  "nfc_url_signed",
+                  "ble_beacon",
+                  "iot_button",
+                  "photo_evidence",
+                  "qr_dynamic"
+                ]
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "securityLevel": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "provisioningStatus": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "key_generated",
+                  "chip_assigned",
+                  "provisioned",
+                  "failed",
+                  "revoked"
+                ]
+              },
+              "provisionedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "lastProvisioningError": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "active",
+              "securityLevel",
+              "config",
+              "provisioningStatus",
+              "provisionedAt",
+              "lastProvisioningError"
+            ]
+          },
+          "firstScanAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "supersededById": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "isLocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "locationId"
+        ]
+      },
+      "VerificationTypeRetired": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "VERIFICATION_TYPE_RETIRED"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "code"
+        ]
+      },
+      "VerificationCodeTaken": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "VERIFICATION_CODE_TAKEN"
+            ]
+          },
+          "conflictingCheckpointId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "code",
+          "conflictingCheckpointId"
+        ]
+      },
+      "CheckpointLocationArchivedConflict": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "LOCATION_ARCHIVED"
+            ]
+          },
+          "data": {
+            "nullable": true
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "code",
+          "data",
+          "error"
+        ]
+      },
+      "UpdateCheckpointBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "fraudRules": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "gpsProximity": {
+                "type": "object",
+                "properties": {
+                  "maxDistanceMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "maxAccuracyMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                },
+                "required": [
+                  "maxDistanceMeters"
+                ]
+              },
+              "undergroundMode": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "AccessLogsListResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "locationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "zone": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "authorizedPersonId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "authorizedPersonIdentifier": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "authorizedPersonName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "registeredByUserId": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "ENTRY",
+                    "EXIT"
+                  ]
+                },
+                "timestamp": {
+                  "type": "string"
+                },
+                "visitorName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "visitorDocument": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "visitorCompany": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "destination": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "notes": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "redacted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "locationId",
+                "zone",
+                "authorizedPersonId",
+                "authorizedPersonIdentifier",
+                "authorizedPersonName",
+                "registeredByUserId",
+                "type",
+                "timestamp",
+                "visitorName",
+                "visitorDocument",
+                "visitorCompany",
+                "destination",
+                "notes",
+                "createdAt",
+                "redacted"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "page",
+          "limit"
+        ]
+      },
+      "ActiveEntriesResponse": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "locationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "zone": {
+              "type": "string",
+              "nullable": true
+            },
+            "authorizedPersonId": {
+              "type": "string",
+              "nullable": true,
+              "format": "uuid"
+            },
+            "authorizedPersonIdentifier": {
+              "type": "string",
+              "nullable": true
+            },
+            "authorizedPersonName": {
+              "type": "string",
+              "nullable": true
+            },
+            "registeredByUserId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ENTRY",
+                "EXIT"
+              ]
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "visitorName": {
+              "type": "string",
+              "nullable": true
+            },
+            "visitorDocument": {
+              "type": "string",
+              "nullable": true
+            },
+            "visitorCompany": {
+              "type": "string",
+              "nullable": true
+            },
+            "destination": {
+              "type": "string",
+              "nullable": true
+            },
+            "notes": {
+              "type": "string",
+              "nullable": true
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "redacted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "locationId",
+            "zone",
+            "authorizedPersonId",
+            "authorizedPersonIdentifier",
+            "authorizedPersonName",
+            "registeredByUserId",
+            "type",
+            "timestamp",
+            "visitorName",
+            "visitorDocument",
+            "visitorCompany",
+            "destination",
+            "notes",
+            "createdAt",
+            "redacted"
+          ]
+        }
+      },
+      "IncidentsListResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "locationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "organizationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "OPEN",
+                    "IN_PROGRESS",
+                    "RESOLVED",
+                    "DISCARDED",
+                    "CLOSED"
+                  ]
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "LOW",
+                    "MEDIUM",
+                    "HIGH",
+                    "CRITICAL"
+                  ]
+                },
+                "categoryId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "subcategoryId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "categoryName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "subcategoryName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "reportedByPatrollerId": {
+                  "type": "string"
+                },
+                "reporterName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "assignedToUserId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "assignedToName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "latitude": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "longitude": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "scanId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "routeRoundId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "resolvedAt": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "closedAt": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "checkpoints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name"
+                    ]
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "redacted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "locationId",
+                "organizationId",
+                "title",
+                "description",
+                "status",
+                "priority",
+                "categoryId",
+                "subcategoryId",
+                "categoryName",
+                "subcategoryName",
+                "reportedByPatrollerId",
+                "reporterName",
+                "assignedToUserId",
+                "assignedToName",
+                "latitude",
+                "longitude",
+                "scanId",
+                "routeRoundId",
+                "resolvedAt",
+                "closedAt",
+                "clientId",
+                "checkpoints",
+                "createdAt",
+                "updatedAt",
+                "redacted"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "page",
+          "limit"
+        ]
+      },
+      "IncidentDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "IN_PROGRESS",
+              "RESOLVED",
+              "DISCARDED",
+              "CLOSED"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "categoryId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "subcategoryId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "categoryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "subcategoryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "reportedByPatrollerId": {
+            "type": "string"
+          },
+          "reporterName": {
+            "type": "string",
+            "nullable": true
+          },
+          "assignedToUserId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "assignedToName": {
+            "type": "string",
+            "nullable": true
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "scanId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "routeRoundId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "resolvedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "closedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "incidentId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "authorName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "oldValue": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "newValue": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "mediaUrl": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "mediaThumbnailUrl": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "incidentId",
+                "type",
+                "content",
+                "authorName",
+                "oldValue",
+                "newValue",
+                "mediaUrl",
+                "mediaThumbnailUrl",
+                "createdAt"
+              ]
+            }
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "thumbnailUrl": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "filename": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "url",
+                "thumbnailUrl",
+                "filename",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "locationId",
+          "organizationId",
+          "title",
+          "description",
+          "status",
+          "priority",
+          "categoryId",
+          "subcategoryId",
+          "categoryName",
+          "subcategoryName",
+          "reportedByPatrollerId",
+          "reporterName",
+          "assignedToUserId",
+          "assignedToName",
+          "latitude",
+          "longitude",
+          "scanId",
+          "routeRoundId",
+          "resolvedAt",
+          "closedAt",
+          "clientId",
+          "checkpoints",
+          "createdAt",
+          "updatedAt",
+          "redacted",
+          "timeline",
+          "media"
+        ]
+      },
+      "UpdateIncidentStatusBody": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "IN_PROGRESS",
+              "RESOLVED",
+              "DISCARDED",
+              "CLOSED"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "AddIncidentCommentBody": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "comment"
+        ]
+      },
+      "IncidentTimelineEntryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "incidentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorName": {
+            "type": "string",
+            "nullable": true
+          },
+          "oldValue": {
+            "type": "string",
+            "nullable": true
+          },
+          "newValue": {
+            "type": "string",
+            "nullable": true
+          },
+          "mediaUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "mediaThumbnailUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "incidentId",
+          "type",
+          "content",
+          "authorName",
+          "oldValue",
+          "newValue",
+          "mediaUrl",
+          "mediaThumbnailUrl",
+          "createdAt"
+        ]
+      },
+      "AssignIncidentBody": {
+        "type": "object",
+        "properties": {
+          "assignToUserId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "assignToUserId"
+        ]
+      },
+      "GetLicenseInfoResponse": {
+        "type": "object",
+        "properties": {
+          "license": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tierId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "trial",
+                  "bonus",
+                  "expired",
+                  "cancelled",
+                  "past_due"
+                ]
+              },
+              "trialStartDate": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "trialEndDate": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "currentPeriodStart": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "currentPeriodEnd": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "cancelAtPeriodEnd": {
+                "type": "boolean"
+              },
+              "metadata": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "tierId",
+              "status",
+              "trialStartDate",
+              "trialEndDate",
+              "currentPeriodStart",
+              "currentPeriodEnd",
+              "cancelAtPeriodEnd",
+              "metadata",
+              "createdAt",
+              "updatedAt"
+            ]
+          },
+          "tier": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "identifier": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string",
+                "nullable": true
+              },
+              "price": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "billingInterval": {
+                "type": "string",
+                "enum": [
+                  "month",
+                  "year"
+                ]
+              },
+              "features": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "isActive": {
+                "type": "boolean"
+              },
+              "sortOrder": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "identifier",
+              "description",
+              "price",
+              "currency",
+              "billingInterval",
+              "features",
+              "limits",
+              "isActive",
+              "sortOrder"
+            ]
+          },
+          "isTrialActive": {
+            "type": "boolean"
+          },
+          "trialDaysRemaining": {
+            "type": "number",
+            "nullable": true
+          },
+          "canUpgradeTo": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "price": {
+                  "type": "number"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "billingInterval": {
+                  "type": "string",
+                  "enum": [
+                    "month",
+                    "year"
+                  ]
+                },
+                "features": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                },
+                "isActive": {
+                  "type": "boolean"
+                },
+                "sortOrder": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "identifier",
+                "description",
+                "price",
+                "currency",
+                "billingInterval",
+                "features",
+                "limits",
+                "isActive",
+                "sortOrder"
+              ]
+            }
+          },
+          "usage": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LicenseUsage"
+              },
+              {
+                "nullable": true
+              }
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "EUR",
+              "USD"
+            ]
+          }
+        },
+        "required": [
+          "license",
+          "tier",
+          "isTrialActive",
+          "trialDaysRemaining",
+          "canUpgradeTo",
+          "usage",
+          "currency"
+        ]
+      },
+      "OAuthAuthorizationServerMetadata": {
+        "type": "object",
+        "properties": {
+          "issuer": {
+            "type": "string"
+          },
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "token_endpoint": {
+            "type": "string"
+          },
+          "registration_endpoint": {
+            "type": "string"
+          },
+          "revocation_endpoint": {
+            "type": "string"
+          },
+          "jwks_uri": {
+            "type": "string"
+          },
+          "response_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code_challenge_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revocation_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "client_id_metadata_document_supported": {
+            "type": "boolean"
+          },
+          "authorization_response_iss_parameter_supported": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "issuer",
+          "authorization_endpoint",
+          "token_endpoint",
+          "registration_endpoint",
+          "revocation_endpoint",
+          "jwks_uri",
+          "response_types_supported",
+          "grant_types_supported",
+          "code_challenge_methods_supported",
+          "token_endpoint_auth_methods_supported",
+          "revocation_endpoint_auth_methods_supported",
+          "scopes_supported",
+          "client_id_metadata_document_supported",
+          "authorization_response_iss_parameter_supported"
+        ]
+      },
+      "OAuthJwks": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "required": [
+          "keys"
+        ]
+      },
+      "OAuthErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "error_description"
+        ]
+      },
+      "OAuthRegisterClientRequest": {
+        "type": "object",
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "logo_uri": {
+            "type": "string"
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "redirect_uris"
+        ]
+      },
+      "OAuthRegisterClientResponse": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "type": "integer"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "logo_uri": {
+            "type": "string"
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "client_name",
+          "redirect_uris",
+          "token_endpoint_auth_method",
+          "grant_types",
+          "response_types"
+        ]
+      },
+      "OAuthTokenRequest": {
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "code_verifier": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant_type",
+          "client_id"
+        ]
+      },
+      "OAuthTokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "refresh_token",
+          "scope"
+        ]
+      },
+      "OAuthRevokeRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "token_type_hint": {
+            "type": "string",
+            "enum": [
+              "access_token",
+              "refresh_token"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "client_id"
+        ]
+      },
+      "OAuthAgentSessionResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "integer"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at",
+          "scope",
+          "user_id"
+        ]
+      },
+      "ListLocationsResponse": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "nullable": true
+            },
+            "address": {
+              "type": "string"
+            },
+            "city": {
+              "type": "string",
+              "nullable": true
+            },
+            "organizationId": {
+              "type": "string",
+              "nullable": true,
+              "format": "uuid"
+            },
+            "archivedAt": {
+              "type": "string",
+              "nullable": true,
+              "format": "date-time"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "id",
+            "address"
+          ]
+        }
+      },
+      "UpdateLocationBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "address": {
+            "type": "string",
+            "nullable": true,
+            "description": "`null` clears it (stored as an empty string)."
+          },
+          "city": {
+            "type": "string"
+          }
+        },
+        "description": "Only name, address and city are applied; any other field is ignored."
+      },
+      "LocationResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "address"
+        ]
+      },
+      "ListPatrollersResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "phone": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "organizationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "organizationName": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "archivedAt": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "date-time"
+                },
+                "lastScanDate": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "date-time"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "inactive",
+                    "alert"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "identifier",
+                "organizationId",
+                "createdAt",
+                "status"
+              ]
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ]
+      },
+      "UpdatePatrollerBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "PatrollerResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationName": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastScanDate": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "alert"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "identifier",
+          "organizationId",
+          "createdAt",
+          "status"
+        ]
+      },
+      "ListScansResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanListItem"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ]
+      },
+      "PaginatedRoutes": {
+        "type": "object",
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        }
+      },
+      "RouteCheckpoint": {
+        "type": "object",
+        "required": [
+          "id",
+          "routeId",
+          "checkpointId",
+          "order"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "routeId": {
+            "type": "string"
+          },
+          "checkpointId": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer"
+          },
+          "checkpoint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "RouteTimeWindow": {
+        "type": "object",
+        "required": [
+          "id",
+          "routeId",
+          "startTime",
+          "endTime",
+          "days"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "routeId": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "timezone": {
+            "type": "string",
+            "nullable": true,
+            "description": "IANA timezone the window was configured in, or null for windows created before #995. Clients must edit the schedule in THIS timezone, not in the timezone of whoever opens the form: sending back a different one would re-label the route and shift it on the next DST change."
+          },
+          "utcOffsetMinutes": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Offset in minutes applied when the local times were converted to UTC, or null. Recorded so the backend can re-project the window when the offset changes (DST, #995)."
+          }
+        }
+      },
+      "RouteWithDetails": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Route"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "checkpoints": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteCheckpoint"
+                }
+              },
+              "isFirstRoute": {
+                "type": "boolean",
+                "description": "Only on create. True when this is the first route of the organization, decided atomically server-side (#937)."
+              },
+              "timeWindows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteTimeWindow"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RouteGuardMode": {
+        "type": "string",
+        "enum": [
+          "strict",
+          "flexible"
+        ]
+      },
+      "RouteScheduleMode": {
+        "type": "string",
+        "enum": [
+          "strict",
+          "flexible"
+        ]
+      },
+      "RouteRoundsPage": {
+        "type": "object",
+        "required": [
+          "results",
+          "count",
+          "totalPages"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteRound"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          }
+        }
+      },
+      "RouteRoundCheckpointItem": {
+        "type": "object",
+        "required": [
+          "checkpointId",
+          "checkpointName",
+          "order",
+          "scanned",
+          "scanTime"
+        ],
+        "properties": {
+          "checkpointId": {
+            "type": "string"
+          },
+          "checkpointName": {
+            "type": "string",
+            "nullable": true
+          },
+          "order": {
+            "type": "integer"
+          },
+          "scanned": {
+            "type": "boolean"
+          },
+          "scanTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Route": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "identifier",
+          "requiresOrderedScan",
+          "guardMode",
+          "scheduleMode",
+          "isActive",
+          "organizationId",
+          "locationId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "requiresOrderedScan": {
+            "type": "boolean"
+          },
+          "guardMode": {
+            "$ref": "#/components/schemas/RouteGuardMode"
+          },
+          "scheduleMode": {
+            "$ref": "#/components/schemas/RouteScheduleMode"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "locationId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "description": "Optimistic-concurrency counter. Send it back as `expectedVersion` on update (#936)."
+          },
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the route was archived because it has history (#1283); null while in use. An archived route is inactive and left out of lists unless `includeArchived=true`."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "LicenseUsage": {
+        "type": "object",
+        "properties": {
+          "checkpoints": {
+            "type": "object",
+            "properties": {
+              "used": {
+                "type": "integer"
+              },
+              "included": {
+                "type": "integer",
+                "nullable": true
+              },
+              "extra": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "used",
+              "included",
+              "extra"
+            ]
+          },
+          "locations": {
+            "type": "object",
+            "properties": {
+              "used": {
+                "type": "integer"
+              },
+              "limit": {
+                "type": "integer",
+                "nullable": true
+              }
+            },
+            "required": [
+              "used",
+              "limit"
+            ]
+          },
+          "managers": {
+            "type": "object",
+            "properties": {
+              "used": {
+                "type": "integer"
+              },
+              "limit": {
+                "type": "integer",
+                "nullable": true
+              }
+            },
+            "required": [
+              "used",
+              "limit"
+            ]
+          }
+        },
+        "required": [
+          "checkpoints",
+          "locations",
+          "managers"
+        ]
+      },
+      "ScanListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkpointName": {
+            "type": "string",
+            "nullable": true
+          },
+          "patrollerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "patrollerIdentification": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deviceInfo": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "deviceName": {
+                "type": "string",
+                "nullable": true
+              },
+              "platform": {
+                "type": "string",
+                "nullable": true
+              },
+              "osVersion": {
+                "type": "string",
+                "nullable": true
+              },
+              "manufacturer": {
+                "type": "string",
+                "nullable": true
+              },
+              "batteryLevel": {
+                "type": "number",
+                "nullable": true
+              },
+              "batteryStatus": {
+                "type": "string",
+                "nullable": true
+              },
+              "connectionType": {
+                "type": "string",
+                "nullable": true
+              },
+              "connectionDownlink": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "required": [
+              "deviceName",
+              "platform",
+              "osVersion",
+              "manufacturer",
+              "batteryLevel",
+              "batteryStatus",
+              "connectionType",
+              "connectionDownlink"
+            ]
+          },
+          "location": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ]
+          },
+          "fraudFlags": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "flagged": {
+                "type": "boolean"
+              },
+              "gpsProximity": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "skipped"
+                    ]
+                  },
+                  "distanceMeters": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "accuracyMeters": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "effectiveDistanceMeters": {
+                    "type": "number",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "status",
+                  "distanceMeters",
+                  "accuracyMeters",
+                  "effectiveDistanceMeters"
+                ]
+              },
+              "undergroundMode": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "skipped"
+                    ]
+                  },
+                  "connectionType": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "connectionDownlink": {
+                    "type": "number",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "status",
+                  "connectionType",
+                  "connectionDownlink"
+                ]
+              }
+            },
+            "required": [
+              "flagged"
+            ]
+          },
+          "validationStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected",
+              null
+            ]
+          },
+          "validationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "redacted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "checkpointName",
+          "patrollerName",
+          "patrollerIdentification",
+          "timestamp",
+          "deviceInfo",
+          "location",
+          "fraudFlags",
+          "validationStatus",
+          "validationReason",
+          "redacted"
+        ]
+      },
+      "RouteRound": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "oauthAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "OAuth access token issued by POST /oauth/token"
+      }
+    }
+  }
+}

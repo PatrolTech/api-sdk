@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+# Generated from openapi/openapi.public.json by `npm run generate`
+src/generated/
+*.tgz

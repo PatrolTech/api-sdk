@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      # Pinned to the version of PatrolTech's internal SDK: a newer orval can
+      # drop operations from the generated client. Bump it on purpose, together.
+      - dependency-name: orval
+      - dependency-name: '@orval/*'
+      # A TypeScript major changes the emitted code and module options: on purpose too.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+    groups:
+      dev-dependencies:
+        patterns:
+          - '*'
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
