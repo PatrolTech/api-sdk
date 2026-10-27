@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "PatrolTech Public API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
   },
   "servers": [
@@ -60,7 +60,7 @@
             "in": "query",
             "name": "includeArchived",
             "required": false,
-            "description": "`true` also lists the archived routes (#1283). By default they are left out.",
+            "description": "`true` also lists the archived routes. By default they are left out.",
             "schema": {
               "type": "string",
               "enum": [
@@ -92,7 +92,7 @@
             }
           },
           "403": {
-            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`.",
+            "description": "Without `locationId`: no organization-wide role (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -243,7 +243,7 @@
             }
           },
           "400": {
-            "description": "The new window overlaps one the route already has (#978): `code` is `TIME_WINDOWS_OVERLAP` and `data.windows` carries both conflicting windows (UTC). Also returned when `timezone` is not a valid IANA zone, as a plain error whose `message` is `Invalid timezone: <zone>` (no `code`). Nothing is created.",
+            "description": "The new window overlaps one the route already has: `code` is `TIME_WINDOWS_OVERLAP` and `data.windows` carries both conflicting windows (UTC). Also returned when `timezone` is not a valid IANA zone, as a plain error whose `message` is `Invalid timezone: <zone>` (no `code`). Nothing is created.",
             "content": {
               "application/json": {
                 "schema": {
@@ -281,7 +281,7 @@
             "description": "Time window removed from route"
           },
           "403": {
-            "description": "No EDITOR role on the route's location (nor in its organization), the route's organization is not linked to its location as `owner` or `provider`, or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+            "description": "No EDITOR role on the route's location (nor in its organization), the route's organization is not linked to its location as `owner` or `provider`, or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an AI agent session (a token from `/oauth/agent-session`) never makes this write, even with the write scope"
           },
           "404": {
             "description": "Time window not found, or its route no longer exists"
@@ -364,7 +364,7 @@
             }
           },
           "400": {
-            "description": "Two of the submitted time windows overlap (#978). Nothing is created; `data.windows` carries both conflicting windows (UTC). Also returned, with `code: CHECKPOINT_NOT_IN_ROUTE_LOCATION` and `data: null`, when a checkpoint is not on the route's location, and with `code: CHECKPOINT_ARCHIVED` and `data.checkpointIds` when a checkpoint is archived.",
+            "description": "Two of the submitted time windows overlap. Nothing is created; `data.windows` carries both conflicting windows (UTC). Also returned, with `code: CHECKPOINT_NOT_IN_ROUTE_LOCATION` and `data: null`, when a checkpoint is not on the route's location, and with `code: CHECKPOINT_ARCHIVED` and `data.checkpointIds` when a checkpoint is archived.",
             "content": {
               "application/json": {
                 "schema": {
@@ -374,7 +374,7 @@
             }
           },
           "409": {
-            "description": "`code: LOCATION_ARCHIVED`: the location is archived (#1283). Nothing is created; restore the location first.",
+            "description": "`code: LOCATION_ARCHIVED`: the location is archived. Nothing is created; restore the location first.",
             "content": {
               "application/json": {
                 "schema": {
@@ -563,7 +563,509 @@
         }
       }
     },
+    "/api/agent-proposals/batches": {
+      "post": {
+        "operationId": "proposeAgentActions",
+        "summary": "Propose a batch of write actions awaiting confirmation",
+        "description": "In one transaction it withdraws the still-`proposed` proposals of this user and contextKey (`expired` if they had already expired, `cancelled` if not) and stores the new batch with a new `batchId`, positions 0..n-1 and expiry now + ttlMin. A live proposal that the new batch repeats unchanged (same action, params, organization and idempotency key) is carried over: its copy in the new batch replaces it instead of it being cancelled, so a client that re-sends its pending batch plus one more action does not spend the daily quota twice. With a suspended organization the proposal is accepted (the user belongs to it); when it is executed, the real endpoint will answer 423. Proposals are scoped by the user and, for an agent token, by its OAuth client: another client of the same user never sees them. If the token's user no longer exists the answer is 401 with `meta.errorCode: USER_NOT_FOUND`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeAgentActionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored batch, in the proposed order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentProposal"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: invalid body (more than 10 actions, ttlMin outside 1..60, contextKey ending in whitespace…); or PARAMS_TOO_LARGE: the params of an action are over 16384 bytes. Nothing is stored"
+          },
+          "403": {
+            "description": "ORGANIZATION_NOT_ALLOWED: the user does not belong to the organization of an action; nothing is stored. Or USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          },
+          "429": {
+            "description": "RATE_LIMITED: more than 30 batches per minute from this user; or PROPOSAL_QUOTA_EXCEEDED: they already created 300 proposals in the last 24 hours (carried-over copies are not counted twice). Nothing is stored"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/batches/{batchId}": {
+      "get": {
+        "operationId": "getAgentProposalBatch",
+        "summary": "The actions of a batch, in the order they were proposed",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "batchId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "pattern": "\\S$",
+              "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+            },
+            "required": true,
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace.",
+            "name": "contextKey",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The actions of the batch of this user and contextKey; empty if there are none (also when batchId is not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentProposal"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: contextKey is missing or invalid"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one)"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/live": {
+      "get": {
+        "operationId": "getLiveAgentProposal",
+        "summary": "The first still-proposed action of the latest live batch of the contextKey",
+        "description": "It is returned even if it has already expired: the caller decides what to say.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "pattern": "\\S$",
+              "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+            },
+            "required": true,
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace.",
+            "name": "contextKey",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: contextKey is missing or invalid"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one)"
+          },
+          "404": {
+            "description": "NO_LIVE_PROPOSAL: no action of this contextKey is still proposed"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/executed-recently": {
+      "get": {
+        "operationId": "agentProposalExecutedRecently",
+        "summary": "Was any action of this contextKey executed in the last few minutes?",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "pattern": "\\S$",
+              "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+            },
+            "required": true,
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace.",
+            "name": "contextKey",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1440,
+              "description": "Minutes: integer between 1 and 1440."
+            },
+            "required": true,
+            "description": "Minutes: integer between 1 and 1440.",
+            "name": "withinMin",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Yes or no",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposalExecutedRecently"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: contextKey is missing or invalid, or withinMin is not an integer between 1 and 1440"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one)"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/{id}": {
+      "get": {
+        "operationId": "getAgentProposal",
+        "summary": "A proposal of the user",
+        "description": "The id is case-insensitive.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one)"
+          },
+          "404": {
+            "description": "PROPOSAL_NOT_FOUND: it does not exist, the id is not a UUID, or it belongs to another user or OAuth client: the same answer for all"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/{id}/claim": {
+      "post": {
+        "operationId": "claimAgentProposal",
+        "summary": "Claim a proposal to execute it (proposed → executing, atomic)",
+        "description": "Of two simultaneous claims only one receives 200. An expired proposal that nobody had touched is marked `expired` here.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimAgentProposalBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: contextKey is missing or invalid"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          },
+          "404": {
+            "description": "PROPOSAL_NOT_FOUND: it does not exist for this user, OAuth client and contextKey (or the id is not a UUID)"
+          },
+          "409": {
+            "description": "PROPOSAL_NOT_CLAIMABLE: already claimed, done, withdrawn or expired; data.status is the current status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposalNotClaimable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/{id}/executed": {
+      "post": {
+        "operationId": "markAgentProposalExecuted",
+        "summary": "Mark a claimed proposal as executed, with its result",
+        "description": "The action has already run, so the row always becomes `executed`, whatever the size of the result: a result over 16384 bytes is stored truncated as `{ truncated: true, preview }`, and a body over the HTTP limit (1 MB) as `{ truncated: true, preview: \"\", reason: \"request_body_too_large\" }`. It is never left `executing` (it could be reopened and executed twice). This is bookkeeping on the caller's own row, so it is exempt from the 423 and 451 walls. An `executing` action that nobody closes within an hour is closed automatically as `failed` with error `stale_executing`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkAgentProposalExecutedBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Marked"
+          },
+          "400": {
+            "description": "INVALID_REQUEST: invalid body"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          },
+          "404": {
+            "description": "PROPOSAL_NOT_FOUND: the id is not a UUID"
+          },
+          "409": {
+            "description": "PROPOSAL_NOT_EXECUTING: it is not `executing`, or it is not a proposal of this user and OAuth client: it is only closed from executing"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/{id}/failed": {
+      "post": {
+        "operationId": "markAgentProposalFailed",
+        "summary": "Mark a claimed proposal as failed, with its error",
+        "description": "Bookkeeping on the caller's own row, so it is exempt from the 423 and 451 walls. A body over the HTTP limit (1 MB) closes it as `failed` with error \"request body too large\".",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkAgentProposalFailedBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Marked"
+          },
+          "400": {
+            "description": "INVALID_REQUEST: the error field is missing or not a string"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          },
+          "404": {
+            "description": "PROPOSAL_NOT_FOUND: the id is not a UUID"
+          },
+          "409": {
+            "description": "PROPOSAL_NOT_EXECUTING: it is not `executing`, or it is not a proposal of this user and OAuth client: it is only closed from executing"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/reopen": {
+      "post": {
+        "operationId": "reopenAgentProposals",
+        "summary": "Leave as proposals again the actions that have not been done yet",
+        "description": "The user's actions that are `proposed`, or `executing` and claimed less than an hour ago, and belong to the latest batch of their contextKey go back to `proposed` with a renewed expiry. The rest are not touched: finished ones, ones from a batch older than the latest proposed, `executing` ones claimed over an hour ago (they may have run: they are closed as `failed` instead) and ids of another user or OAuth client. If the token's user no longer exists the answer is 401 with `meta.errorCode: USER_NOT_FOUND`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenAgentProposalsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "INVALID_REQUEST: no ids, more than 10 ids, an id that is not a UUID, or ttlMin outside 1..60"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          }
+        }
+      }
+    },
+    "/api/agent-proposals/cancel": {
+      "post": {
+        "operationId": "cancelAgentProposals",
+        "summary": "Withdraw the whole live batch of the contextKey",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelAgentProposalsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One of the withdrawn ones, with its final status (cancelled, or expired if it came late)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: contextKey is missing or invalid"
+          },
+          "403": {
+            "description": "USER_SESSION_REQUIRED: the token is not a user session (for instance, a patroller one); or insufficient_scope: an agent token with only the read scope cannot write"
+          },
+          "404": {
+            "description": "NO_LIVE_PROPOSAL: no action of this contextKey is still proposed"
+          }
+        }
+      }
+    },
     "/api/auth/user/preferences": {
+      "get": {
+        "operationId": "getUserPreferences",
+        "summary": "Get user preferences",
+        "description": "The caller's own language, timezone and notification preferences. Change them with `updateUserPreferences`. A token that is not a user session (for instance, a patroller one) has no preferences: 404.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "operationId": "updateUserPreferences",
         "summary": "Update user preferences",
@@ -596,7 +1098,7 @@
             "description": "Invalid language code"
           },
           "403": {
-            "description": "meta.errorCode AGENT_CANNOT_CHANGE_IDENTITY: una sesión de agente MCP (via: 'mcp') no cambia los teléfonos de la cuenta (phone, whatsappPhone); solo la sesión del propio usuario. No se cambió nada (solo si el body trae whatsappPhone)"
+            "description": "meta.errorCode AGENT_CANNOT_CHANGE_IDENTITY: an AI agent session (a token from `/oauth/agent-session`) does not change the account's phones (phone, whatsappPhone); only the user's own session does. Nothing was changed (only when the body carries whatsappPhone)"
           }
         }
       }
@@ -605,7 +1107,7 @@
       "put": {
         "operationId": "updateUserRole",
         "summary": "Update the role type of an existing user role",
-        "description": "Needs a genuine ADMIN role in the organization the role belongs to (for a location role, the organization of that location). Promoting a VIEWER to EDITOR or ADMIN takes a manager seat and goes through the plan limit (402).",
+        "description": "Needs an organization-wide ADMIN role in the organization the role belongs to (for a location role, the organization of that location). Promoting a VIEWER to EDITOR or ADMIN takes a manager seat and goes through the plan limit (402).",
         "security": [
           {
             "bearerAuth": []
@@ -649,7 +1151,7 @@
             "description": "`code: USER_LIMIT_REACHED`: promoting a VIEWER to EDITOR or ADMIN would exceed the plan's `max_users`. The body carries `limit`, `currentUsage` and `upsell`. Nothing changes."
           },
           "403": {
-            "description": "Not an ADMIN of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never gives or changes a role, even with the write scope. Also when the role does not exist and the body does not name its organization (`Organization could not be resolved`): its organization cannot be resolved, so it is refused before looking further."
+            "description": "Not an ADMIN of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an AI agent session (a token from `/oauth/agent-session`) never gives or changes a role, even with the write scope. Also when the role does not exist and the body does not name its organization (`Organization could not be resolved`): its organization cannot be resolved, so it is refused before looking further."
           },
           "404": {
             "description": "User role not found (only reachable when the body carries an `organizationId` the caller administers)"
@@ -659,7 +1161,7 @@
       "delete": {
         "operationId": "deleteUserRole",
         "summary": "Remove a role from a user",
-        "description": "Needs a genuine ADMIN role in the organization the role belongs to (for a location role, the organization of that location).",
+        "description": "Needs an organization-wide ADMIN role in the organization the role belongs to (for a location role, the organization of that location).",
         "security": [
           {
             "bearerAuth": []
@@ -681,10 +1183,34 @@
             "description": "Role removed"
           },
           "403": {
-            "description": "Not an ADMIN of the organization, the role does not exist (its organization cannot be resolved: `Organization could not be resolved`), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+            "description": "Not an ADMIN of the organization, the role does not exist (its organization cannot be resolved: `Organization could not be resolved`), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an AI agent session (a token from `/oauth/agent-session`) never makes this write, even with the write scope"
           },
           "404": {
             "description": "User role not found (only reachable when the body carries an `organizationId` the caller administers)"
+          }
+        }
+      }
+    },
+    "/api/organizations/list": {
+      "get": {
+        "operationId": "listOrganizations",
+        "summary": "List organizations the authenticated user has access to",
+        "description": "The organizations where the caller has a role (VIEWER or above), either on the organization or on one of its non-archived locations. Empty when there are none.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization map, keyed by organization id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrganizationsResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -728,7 +1254,7 @@
       "post": {
         "operationId": "createOrganizationUser",
         "summary": "Create a user and assign them to an organization",
-        "description": "Needs a genuine ADMIN role in `organizationId`. A new email creates the account and sends it an invitation to set its password; an existing one only gets the role (and a notification). An EDITOR or ADMIN role takes a manager seat and goes through the plan limit (402); VIEWER never does.",
+        "description": "Needs an organization-wide ADMIN role in `organizationId`. A new email creates the account and sends it an invitation to set its password; an existing one only gets the role (and a notification). An EDITOR or ADMIN role takes a manager seat and goes through the plan limit (402); VIEWER never does.",
         "security": [
           {
             "bearerAuth": []
@@ -773,7 +1299,7 @@
             "description": "`code: USER_LIMIT_REACHED`: an EDITOR or ADMIN role would exceed the plan's `max_users`. The body carries `limit`, `currentUsage` and `upsell`. Nothing is created."
           },
           "403": {
-            "description": "Not an ADMIN of the organization (also without `organizationId`: `Organization could not be resolved`), or locationId is not a location of this organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never invites or assigns anyone, even with the write scope"
+            "description": "Not an ADMIN of the organization (also without `organizationId`: `Organization could not be resolved`), or locationId is not a location of this organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an AI agent session (a token from `/oauth/agent-session`) never invites or assigns anyone, even with the write scope"
           },
           "409": {
             "description": "meta.errorCode ACCOUNT_DELETED: the email belongs to a deleted account. The role is not assigned; the person has to contact support to recover it."
@@ -958,7 +1484,7 @@
             }
           },
           "400": {
-            "description": "VERIFICATION_TYPE_RETIRED: the inline method is `manual_code`, which can no longer be created (#1301). Also VALIDATION_ERROR for a malformed body.",
+            "description": "VERIFICATION_TYPE_RETIRED: the inline method is `manual_code`, which can no longer be created. Also VALIDATION_ERROR for a malformed body.",
             "content": {
               "application/json": {
                 "schema": {
@@ -968,7 +1494,7 @@
             }
           },
           "409": {
-            "description": "VERIFICATION_CODE_TAKEN: the chosen code is already used by a live checkpoint of the organization (body below). Also EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED on paid plans when the checkpoint adds a charge that needs confirming (`confirmExtraBilling`). LOCATION_ARCHIVED when its location is archived (#1283): nothing is created.",
+            "description": "VERIFICATION_CODE_TAKEN: the chosen code is already used by a live checkpoint of the organization (body below). Also EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED on paid plans when the checkpoint adds a charge that needs confirming (`confirmExtraBilling`). LOCATION_ARCHIVED when its location is archived: nothing is created.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1069,7 +1595,7 @@
             }
           },
           "403": {
-            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an AI agent session (a token from `/oauth/agent-session`) never makes this write, even with the write scope"
           },
           "404": {
             "description": "Checkpoint not found"
@@ -1084,7 +1610,7 @@
       "post": {
         "operationId": "unarchiveCheckpoint",
         "summary": "Unarchive a checkpoint",
-        "description": "Devolver un checkpoint al conteo activo es, para el plan, indistinguible de crearlo: pasa por el mismo límite (402 en el tope de Free) y cobra el extra igual (409 de confirmación).",
+        "description": "For the plan, bringing a checkpoint back into the active count is the same as creating one: it goes through the same limit (402 at the Free cap) and is charged as an extra the same way (409 to confirm).",
         "security": [
           {
             "bearerAuth": []
@@ -1126,7 +1652,7 @@
             "description": "`code: CHECKPOINT_LIMIT_REACHED`: a Free plan at its checkpoint limit (unarchiving counts as creating one). The body carries `limit`, `currentUsage` and `upsell`. It stays archived."
           },
           "403": {
-            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an AI agent session (a token from `/oauth/agent-session`) never makes this write, even with the write scope"
           },
           "404": {
             "description": "Checkpoint not found"
@@ -1150,6 +1676,62 @@
           },
           "502": {
             "description": "`code: BILLING_UPDATE_FAILED`: the confirmed extra charge could not be billed. Nothing was charged and it stays archived: retry."
+          }
+        }
+      }
+    },
+    "/api/locations/{locationId}/qr-sheet": {
+      "post": {
+        "operationId": "createLocationQrSheetLink",
+        "summary": "Create a one-hour link to the printable QR sheet of a location",
+        "description": "The sheet holds one QR per finalized, non archived checkpoint with an active qr_static method, in creation order, 12 per A4 page. Each QR encodes the configured code (the checkpoint identifier when the code is empty or longer than 1,000 bytes); a checkpoint with nothing a scan would accept is left out. The PDF itself is not returned: open the link from `downloadQrSheet`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "locationId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateQrSheetBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateQrSheetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body does not match CreateQrSheetBody"
+          },
+          "403": {
+            "description": "The caller is not an EDITOR of the location (a role on an archived location does not count)"
+          },
+          "404": {
+            "description": "LOCATION_NOT_FOUND: no such location, or one without organization (errorCode in the response metadata)"
+          },
+          "422": {
+            "description": "NO_PRINTABLE_CHECKPOINTS: nothing to print; or QR_SHEET_TOO_LARGE: more than 600 printable checkpoints, send `checkpointIds` to print a subset (errorCode in the response metadata)"
           }
         }
       }
@@ -1192,7 +1774,7 @@
             "description": "NO_PRINTABLE_CHECKPOINTS: nothing printable is left; or QR_SHEET_TOO_LARGE: the location now has more than 600 printable checkpoints (errorCode in the response metadata)"
           },
           "423": {
-            "description": "ORGANIZATION_SUSPENDED: the organization of the location is suspended. Same body as the panel 423; the link carries no session, so the suspension is checked here."
+            "description": "ORGANIZATION_SUSPENDED: the organization of the location is suspended. Same body as any other 423 (see the contract description); the link carries no session, so the suspension is checked here."
           },
           "429": {
             "description": "Too many downloads: 30 per minute per IP and 10 per minute per user; errorCode RATE_LIMITED"
@@ -1703,7 +2285,7 @@
             }
           },
           "400": {
-            "description": "Invalid body, or meta.errorCode ASSIGNEE_NOT_IN_ORGANIZATION: the assignee has no role in the incident's organization (#1312)"
+            "description": "Invalid body, or meta.errorCode ASSIGNEE_NOT_IN_ORGANIZATION: the assignee has no role in the incident's organization"
           },
           "404": {
             "description": "Incident not found"
@@ -1714,17 +2296,17 @@
     "/api/payments/prices": {
       "get": {
         "operationId": "getPaymentPrices",
-        "summary": "Catálogo de planes activos con su pricing por checkpoints",
-        "description": "Catálogo público: no exige autenticación. Sin sesión, `organizationId` se ignora y los precios salen en la moneda del país (`country` o el de la petición). Con sesión, la moneda de `organizationId` solo se usa si el usuario es de esa organización; si no, se ignora igual: no revela en qué moneda factura otra organización. Si la petición trae `Authorization`, el token tiene que ser válido (401 si no).",
+        "summary": "Catalogue of the active plans with their per-checkpoint pricing",
+        "description": "Public catalogue: no authentication required. Without a session, `organizationId` is ignored and prices come in the currency of the country (`country`, or the request's). With a session, the currency of `organizationId` is used only if the user belongs to that organization; otherwise it is ignored too, so it never reveals another organization's billing currency. If the request carries `Authorization`, the token must be valid (401 otherwise).",
         "parameters": [
           {
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Organización del usuario autenticado para la que se resuelven los precios: `price` y `currency` salen en SU moneda, la misma que le cobrará el proveedor de pagos. Sin sesión, o de una organización ajena, se ignora."
+              "description": "Organization of the authenticated user to price for: `price` and `currency` come in ITS currency, the one the payment provider will charge it in. Ignored without a session, or for an organization the user does not belong to."
             },
             "required": false,
-            "description": "Organización del usuario autenticado para la que se resuelven los precios: `price` y `currency` salen en SU moneda, la misma que le cobrará el proveedor de pagos. Sin sesión, o de una organización ajena, se ignora.",
+            "description": "Organization of the authenticated user to price for: `price` and `currency` come in ITS currency, the one the payment provider will charge it in. Ignored without a session, or for an organization the user does not belong to.",
             "name": "organizationId",
             "in": "query"
           },
@@ -1733,17 +2315,17 @@
               "type": "string",
               "minLength": 2,
               "maxLength": 2,
-              "description": "País de facturación ISO 3166-1 alpha-2 que el cliente eligió en el selector de planes. Si llega, manda sobre la moneda de la organización: es lo que permite re-preciar al cambiar de país. Sin él se usa la moneda de la organización y, si no se conoce, el país de la IP (`CF-IPCountry`)."
+              "description": "Billing country (ISO 3166-1 alpha-2) the customer picked in the plan selector. When present it takes precedence over the organization's currency, so prices can be recomputed when the country changes. Without it, the organization's currency is used and, if unknown, the country of the request's IP (`CF-IPCountry`)."
             },
             "required": false,
-            "description": "País de facturación ISO 3166-1 alpha-2 que el cliente eligió en el selector de planes. Si llega, manda sobre la moneda de la organización: es lo que permite re-preciar al cambiar de país. Sin él se usa la moneda de la organización y, si no se conoce, el país de la IP (`CF-IPCountry`).",
+            "description": "Billing country (ISO 3166-1 alpha-2) the customer picked in the plan selector. When present it takes precedence over the organization's currency, so prices can be recomputed when the country changes. Without it, the organization's currency is used and, if unknown, the country of the request's IP (`CF-IPCountry`).",
             "name": "country",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Planes activos. `price`/`currency` en la moneda de la organización; importes de `pricing` en cents, con eur y usd por si el consumidor necesita los dos.",
+            "description": "Active plans. `price`/`currency` in the organization's currency; `pricing` amounts in cents, in both eur and usd in case the consumer needs both.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1758,8 +2340,8 @@
     "/api/payments/checkout-session": {
       "post": {
         "operationId": "createCheckoutSession",
-        "summary": "Abre un checkout de Stripe para una organización que aún no paga",
-        "description": "La organización va en la cabecera `x-organization-id`. ADMIN. Solo para organizaciones sin suscripción viva: quien ya paga cambia de plan desde el panel. Generar la sesión no cobra nada: se paga en la página del proveedor y el plan se activa al pagar. Si la organización ya tiene más checkpoints de los incluidos en el plan, la sesión cobra también los extra.",
+        "summary": "Open a checkout with the payment provider for an organization that does not pay yet",
+        "description": "The organization goes in the `x-organization-id` header. ADMIN. Only for organizations without a live subscription: one that already pays changes plan from the dashboard. Creating the session charges nothing: payment happens on the provider's page and the plan is activated once paid. If the organization already has more checkpoints than the plan includes, the session also charges the extra ones.",
         "security": [
           {
             "bearerAuth": []
@@ -1770,10 +2352,10 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query)."
+              "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted)."
             },
             "required": true,
-            "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query).",
+            "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted).",
             "name": "x-organization-id",
             "in": "header"
           }
@@ -1790,7 +2372,7 @@
         },
         "responses": {
           "200": {
-            "description": "Sesión de checkout creada",
+            "description": "Checkout session created",
             "content": {
               "application/json": {
                 "schema": {
@@ -1800,19 +2382,19 @@
             }
           },
           "400": {
-            "description": "ORGANIZATION_ID_REQUIRED, VALIDATION_ERROR o CHECKOUT_SESSION_FAILED (el plan no es de pago, o ni la organización ni el usuario tienen email de facturación)"
+            "description": "ORGANIZATION_ID_REQUIRED, VALIDATION_ERROR or CHECKOUT_SESSION_FAILED (the plan is not a paid one, or neither the organization nor the user has a billing email)"
           },
           "403": {
-            "description": "ORGANIZATION_ACCESS_DENIED (sin rol en la organización) o INSUFFICIENT_ORGANIZATION_ROLE (no es ADMIN). AGENT_CANNOT_MANAGE_BILLING: una sesión de agente MCP (via: 'mcp') no gestiona la facturación (pagar, cambiar de plan, cancelar, reanudar ni abrir el portal); solo la sesión del propio usuario. No se cambió nada"
+            "description": "ORGANIZATION_ACCESS_DENIED (no role in the organization) or INSUFFICIENT_ORGANIZATION_ROLE (not an ADMIN). AGENT_CANNOT_MANAGE_BILLING: an AI agent session (a token from `/oauth/agent-session`) does not manage billing (paying, changing plan, cancelling, resuming or opening the portal); only the user's own session does. Nothing was changed"
           },
           "404": {
-            "description": "ORGANIZATION_NOT_FOUND o LICENSE_TIER_NOT_FOUND"
+            "description": "ORGANIZATION_NOT_FOUND or LICENSE_TIER_NOT_FOUND"
           },
           "409": {
-            "description": "ALREADY_SUBSCRIBED: change the plan from the dashboard (la organización ya paga una suscripción y no se abre otra). BILLING_BUSY (la facturación del cliente se está actualizando: reintentar en unos segundos) o LICENSE_CONCURRENT_MODIFICATION (otro proceso cambió la licencia a la vez: reintentar)"
+            "description": "ALREADY_SUBSCRIBED: the organization already pays a subscription and no second one is opened; change the plan from the dashboard. BILLING_BUSY (the billing of the customer is being updated: retry in a few seconds) or LICENSE_CONCURRENT_MODIFICATION (another process changed the license at the same time: retry)"
           },
           "502": {
-            "description": "BILLING_PROVIDER_ERROR: el proveedor de pagos rechazó (o no atendió) la petición. No se cobró nada; una sesión de pago anterior pudo quedar cerrada. Se puede reintentar."
+            "description": "BILLING_PROVIDER_ERROR: the payment provider refused (or did not answer) the request. Nothing was charged; an earlier checkout session may have been closed. It can be retried."
           }
         }
       }
@@ -1820,8 +2402,8 @@
     "/api/payments/customer-portal": {
       "post": {
         "operationId": "createCustomerPortalSession",
-        "summary": "Abre una sesión del portal de cliente de Stripe (método de pago, facturación)",
-        "description": "La organización va en la cabecera `x-organization-id` (por compatibilidad también en el body o la query). ADMIN.",
+        "summary": "Open a session of the payment provider's customer portal (payment method, invoices)",
+        "description": "The organization goes in the `x-organization-id` header (for compatibility, also in the body or the query). ADMIN.",
         "security": [
           {
             "bearerAuth": []
@@ -1832,10 +2414,10 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query)."
+              "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted)."
             },
             "required": true,
-            "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query).",
+            "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted).",
             "name": "x-organization-id",
             "in": "header"
           }
@@ -1852,7 +2434,7 @@
         },
         "responses": {
           "200": {
-            "description": "URL de la sesión del portal",
+            "description": "URL of the portal session",
             "content": {
               "application/json": {
                 "schema": {
@@ -1862,19 +2444,19 @@
             }
           },
           "400": {
-            "description": "ORGANIZATION_ID_REQUIRED o VALIDATION_ERROR (returnUrl)"
+            "description": "ORGANIZATION_ID_REQUIRED or VALIDATION_ERROR (returnUrl)"
           },
           "403": {
-            "description": "ORGANIZATION_ACCESS_DENIED (sin rol en la organización) o INSUFFICIENT_ORGANIZATION_ROLE (no es ADMIN). AGENT_CANNOT_MANAGE_BILLING: una sesión de agente MCP (via: 'mcp') no gestiona la facturación (pagar, cambiar de plan, cancelar, reanudar ni abrir el portal); solo la sesión del propio usuario. No se cambió nada"
+            "description": "ORGANIZATION_ACCESS_DENIED (no role in the organization) or INSUFFICIENT_ORGANIZATION_ROLE (not an ADMIN). AGENT_CANNOT_MANAGE_BILLING: an AI agent session (a token from `/oauth/agent-session`) does not manage billing (paying, changing plan, cancelling, resuming or opening the portal); only the user's own session does. Nothing was changed"
           },
           "404": {
             "description": "ORGANIZATION_NOT_FOUND"
           },
           "409": {
-            "description": "MISSING_STRIPE_CUSTOMER — la organización aún no es cliente del proveedor de pagos (nunca abrió un checkout): no hay portal que abrir"
+            "description": "MISSING_STRIPE_CUSTOMER: the organization is not a customer of the payment provider yet (it never opened a checkout), so there is no portal to open"
           },
           "502": {
-            "description": "BILLING_PROVIDER_ERROR: el proveedor de pagos rechazó (o no atendió) la petición. No se abrió el portal ni se cobró nada. Se puede reintentar."
+            "description": "BILLING_PROVIDER_ERROR: the payment provider refused (or did not answer) the request. No portal was opened and nothing was charged. It can be retried."
           }
         }
       }
@@ -1882,8 +2464,8 @@
     "/api/licenses/organization/{organizationId}": {
       "get": {
         "operationId": "getLicenseInfo",
-        "summary": "Licencia, tier, consumo y opciones de upgrade de una organización",
-        "description": "Abierto a VIEWER: límites y consumo son datos operativos. Los identificadores de Stripe y `billingCountry`/`currencyFixed` (datos de facturación) se omiten para quien no llega a EDITOR. `billing` (si factura, cada cuánto y en qué moneda) llega a todos: `currency` es la moneda en la que se PRECIA a la organización (también si aún no paga) y `billing.currency`, la de la suscripción que paga.",
+        "summary": "License, tier, usage and upgrade options of an organization",
+        "description": "Open to VIEWER: limits and usage are operational data. Billing details are only returned to EDITOR and above. `currency` is the currency the organization is PRICED in (also while it does not pay yet).",
         "security": [
           {
             "bearerAuth": []
@@ -1902,7 +2484,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Información de la licencia",
+            "description": "License information",
             "content": {
               "application/json": {
                 "schema": {
@@ -1912,7 +2494,7 @@
             }
           },
           "404": {
-            "description": "NO_LICENSE — la organización no tiene licencia"
+            "description": "NO_LICENSE: the organization has no license"
           }
         }
       }
@@ -2323,7 +2905,7 @@
     "/oauth/agent-session": {
       "post": {
         "operationId": "createOAuthAgentSession",
-        "summary": "Exchange an OAuth access token for a short-lived user JWT (`via: mcp`) that calls `/api`",
+        "summary": "Exchange an OAuth access token for a short-lived user JWT, an AI agent session, that calls `/api`",
         "security": [
           {
             "oauthAccessToken": []
@@ -2409,10 +2991,10 @@
                 "true",
                 "false"
               ],
-              "description": "`true` also lists the archived locations (#1283). By default they are left out."
+              "description": "`true` also lists the archived locations. By default they are left out."
             },
             "required": false,
-            "description": "`true` also lists the archived locations (#1283). By default they are left out.",
+            "description": "`true` also lists the archived locations. By default they are left out.",
             "name": "includeArchived",
             "in": "query"
           }
@@ -2507,7 +3089,7 @@
             "description": "Location deleted"
           },
           "403": {
-            "description": "Insufficient permissions (no ADMIN role), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+            "description": "Insufficient permissions (no ADMIN role), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an AI agent session (a token from `/oauth/agent-session`) never makes this write, even with the write scope"
           },
           "404": {
             "description": "Location not found"
@@ -2599,7 +3181,7 @@
             }
           },
           "403": {
-            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+            "description": "Without `locationId`: no organization-wide role (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
           },
           "404": {
             "description": "Location not found"
@@ -2609,7 +3191,7 @@
       "post": {
         "operationId": "createPatroller",
         "summary": "Create a patroller",
-        "description": "Needs a genuine EDITOR role (or above) in `organizationId`. The patroller is assigned to every location of the organization. Patrollers are unlimited on every plan.",
+        "description": "Needs an organization-wide EDITOR role (or above) in `organizationId`. The patroller is assigned to every location of the organization. Patrollers are unlimited on every plan.",
         "security": [
           {
             "bearerAuth": []
@@ -2639,7 +3221,7 @@
             "description": "`VALIDATION_ERROR`: the body does not match the schema"
           },
           "403": {
-            "description": "Not an EDITOR of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never adds or restores a guard, whose app signs in with its identifier. Also without `organizationId` (`Organization could not be resolved`)"
+            "description": "Not an EDITOR of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an AI agent session (a token from `/oauth/agent-session`) never adds or restores a guard, whose app signs in with its identifier. Also without `organizationId` (`Organization could not be resolved`)"
           },
           "409": {
             "description": "`code: PATROLLER_IDENTIFIER_TAKEN`: the `identifier` sent is already used by another patroller (it is unique across PatrolTech). Nothing is created: send another or omit it."
@@ -2697,7 +3279,7 @@
       "get": {
         "operationId": "getPatrollerByIdentifier",
         "summary": "Get a patroller by their identifier",
-        "description": "The identifier is unique across PatrolTech and is what the guard app signs in with, so the lookup never reveals one the caller may not see: a patroller of an organization where the caller has no genuine role, and any patroller for a VIEWER whose organization hides part of the patrollers' identity (visibility policy), get the same 404 as an identifier that does not exist.",
+        "description": "The identifier is unique across PatrolTech and is what the guard app signs in with, so the lookup never reveals one the caller may not see: a patroller of an organization where the caller has no organization-wide role, and any patroller for a VIEWER whose organization hides part of the patrollers' identity (visibility policy), get the same 404 as an identifier that does not exist.",
         "security": [
           {
             "bearerAuth": []
@@ -2793,7 +3375,7 @@
             "description": "`from`/`to` is not a date, or `locationId` is repeated"
           },
           "403": {
-            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+            "description": "Without `locationId`: no organization-wide role (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
           },
           "404": {
             "description": "Location not found"
@@ -2805,7 +3387,7 @@
       "get": {
         "operationId": "getPatrollerStats",
         "summary": "Get individual patroller statistics",
-        "description": "Needs a genuine role (VIEWER or above) in the patroller's organization.",
+        "description": "Needs an organization-wide role (VIEWER or above) in the patroller's organization.",
         "security": [
           {
             "bearerAuth": []
@@ -2991,7 +3573,7 @@
             }
           },
           "403": {
-            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+            "description": "Without `locationId`: no organization-wide role (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
           },
           "404": {
             "description": "Location not found"
@@ -3194,7 +3776,7 @@
           "code",
           "data"
         ],
-        "description": "409 of creating, updating, deleting, archiving, unarchiving or activating a route (#1283). `code` is at the top level; LOCATION_ARCHIVED means the location of the route, or the one an update assigns to a route without one (#1318), is archived.",
+        "description": "409 of creating, updating, deleting, archiving, unarchiving or activating a route. `code` is at the top level; LOCATION_ARCHIVED means the location of the route, or the one an update assigns to a route without one, is archived.",
         "properties": {
           "success": {
             "type": "boolean",
@@ -3278,6 +3860,266 @@
       "ApiSuccessRoute": {
         "$ref": "#/components/schemas/Route"
       },
+      "ProposeAgentActionsBody": {
+        "type": "object",
+        "properties": {
+          "contextKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "pattern": "\\S$",
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+          },
+          "ttlMin": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Minutes until it expires if not confirmed."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentProposalItem"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "contextKey",
+          "ttlMin",
+          "items"
+        ]
+      },
+      "AgentProposal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contextKey": {
+            "type": "string"
+          },
+          "batchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "organizationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "executing",
+              "executed",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "result": {
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiry: creation + ttlMin, with millisecond precision."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "contextKey",
+          "batchId",
+          "action",
+          "params",
+          "organizationId",
+          "status",
+          "idempotencyKey",
+          "error",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "AgentProposalExecutedRecently": {
+        "type": "object",
+        "properties": {
+          "executed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "executed"
+        ]
+      },
+      "ClaimAgentProposalBody": {
+        "type": "object",
+        "properties": {
+          "contextKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "pattern": "\\S$",
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+          }
+        },
+        "required": [
+          "contextKey"
+        ]
+      },
+      "AgentProposalNotClaimable": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "executing",
+              "executed",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "MarkAgentProposalExecutedBody": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "nullable": true,
+            "description": "Result of the execution (JSON). If it exceeds 16384 bytes it is stored truncated as `{ truncated: true, preview }` (the start of its JSON) and the action still becomes `executed`: it is never left `executing`. A body over the HTTP limit (1 MB) is stored as `{ truncated: true, preview: \"\", reason: \"request_body_too_large\" }`."
+          }
+        }
+      },
+      "MarkAgentProposalFailedBody": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Truncated to 1000 characters. An empty error is stored as \"unknown error\". A body over the HTTP limit (1 MB) is stored as \"request body too large\"."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "ReopenAgentProposalsBody": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "ttlMin": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Integer between 1 and 60."
+          }
+        },
+        "required": [
+          "ids",
+          "ttlMin"
+        ]
+      },
+      "CancelAgentProposalsBody": {
+        "type": "object",
+        "properties": {
+          "contextKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "pattern": "\\S$",
+            "description": "Key of the client's conversation or session. It only tells sessions of the same user apart; it never grants access to another user's proposals. It must not end with whitespace."
+          }
+        },
+        "required": [
+          "contextKey"
+        ]
+      },
+      "UserPreferencesResponse": {
+        "type": "object",
+        "properties": {
+          "preferredLanguage": {
+            "type": "string",
+            "nullable": true
+          },
+          "preferredTimezone": {
+            "type": "string",
+            "nullable": true
+          },
+          "notificationPreferences": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "channels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                },
+                "description": "Per alert type, which channels are on (`{ <alertType>: { <channel>: boolean } }`). Empty when the user never changed an alert: the defaults apply."
+              },
+              "globalChannels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "description": "Per channel, an override for every alert type (for instance, all email off). It cannot be set through this API, and it wins over `channels`."
+              }
+            },
+            "required": [
+              "channels"
+            ],
+            "description": "null when the user has no notification preferences stored."
+          }
+        },
+        "required": [
+          "preferredLanguage",
+          "preferredTimezone",
+          "notificationPreferences"
+        ]
+      },
       "UpdatePreferencesBody": {
         "type": "object",
         "properties": {
@@ -3342,12 +4184,21 @@
                   "additionalProperties": {
                     "type": "boolean"
                   }
-                }
+                },
+                "description": "Per alert type, which channels are on (`{ <alertType>: { <channel>: boolean } }`). Empty when the user never changed an alert: the defaults apply."
+              },
+              "globalChannels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "description": "Per channel, an override for every alert type (for instance, all email off). It cannot be set through this API, and it wins over `channels`."
               }
             },
             "required": [
               "channels"
-            ]
+            ],
+            "description": "null when the user has no notification preferences stored."
           },
           "whatsappPhone": {
             "type": "string",
@@ -3415,6 +4266,30 @@
           "roleScope",
           "scopeId"
         ]
+      },
+      "ListOrganizationsResponse": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "description": "One of security_company, homeowners_association, maintenance_company or other."
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "type"
+          ]
+        }
       },
       "OrgUsersResponse": {
         "type": "object",
@@ -4508,9 +5383,54 @@
         "properties": {
           "confirmExtraBilling": {
             "type": "boolean",
-            "description": "Acepta el cargo del checkpoint extra. Necesario cuando la respuesta previa fue 409 EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED."
+            "description": "Accepts the charge of the extra checkpoint. Needed when the previous answer was 409 EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED."
           }
         }
+      },
+      "CreateQrSheetBody": {
+        "type": "object",
+        "properties": {
+          "checkpointIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Print only these checkpoints. Ids of another location, archived, draft or non-QR checkpoints are skipped. Omit to print every printable checkpoint of the location."
+          }
+        }
+      },
+      "CreateQrSheetResponse": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Link to the PDF. It works without a session until `expiresAt`, but only while the user who requested it is still an active EDITOR of the location."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checkpointCount": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "pageCount": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt",
+          "checkpointCount",
+          "pageCount"
+        ]
       },
       "AccessLogsListResponse": {
         "type": "object",
@@ -5266,7 +6186,7 @@
             "tierId": {
               "type": "string",
               "format": "uuid",
-              "description": "Lo que se manda a `createCheckoutSession` para contratar este plan."
+              "description": "What to send to `createCheckoutSession` to subscribe to this plan."
             },
             "tierName": {
               "type": "string"
@@ -5276,7 +6196,7 @@
             },
             "price": {
               "type": "number",
-              "description": "Precio base mensual en unidades mayores (no cents), en `currency`."
+              "description": "Monthly base price in major units (not cents), in `currency`."
             },
             "currency": {
               "type": "string"
@@ -5303,7 +6223,7 @@
                 },
                 {
                   "nullable": true,
-                  "description": "null para Free o para un plan legacy fuera del price book."
+                  "description": "null for Free, or for an older plan that is no longer sold."
                 }
               ]
             }
@@ -5335,7 +6255,7 @@
               "year"
             ],
             "default": "month",
-            "description": "Cadencia de facturación elegida por el usuario."
+            "description": "Billing interval chosen by the user."
           },
           "successUrl": {
             "type": "string",
@@ -5348,7 +6268,7 @@
           "country": {
             "type": "string",
             "nullable": true,
-            "description": "País ISO-2 confirmado en el selector de planes. Si la organización ya tiene la moneda fijada, se ignora."
+            "description": "ISO-2 country confirmed in the plan selector. Ignored when the organization already has its currency fixed."
           }
         },
         "required": [
@@ -5363,7 +6283,7 @@
           "sessionUrl": {
             "type": "string",
             "format": "uri",
-            "description": "Página de pago del proveedor. Caduca a los 45 minutos."
+            "description": "The payment provider's checkout page. It expires after 45 minutes."
           }
         },
         "required": [
@@ -5376,7 +6296,7 @@
           "returnUrl": {
             "type": "string",
             "format": "uri",
-            "description": "A dónde vuelve el usuario al salir del portal del proveedor de pagos."
+            "description": "Where the user returns when leaving the payment provider's portal."
           }
         },
         "required": [
@@ -6550,12 +7470,12 @@
           "timezone": {
             "type": "string",
             "nullable": true,
-            "description": "IANA timezone the window was configured in, or null for windows created before #995. Clients must edit the schedule in THIS timezone, not in the timezone of whoever opens the form: sending back a different one would re-label the route and shift it on the next DST change."
+            "description": "IANA timezone the window was configured in, or null for windows created before it was recorded. Clients must edit the schedule in THIS timezone, not in the timezone of whoever opens the form: sending back a different one would re-label the route and shift it on the next DST change."
           },
           "utcOffsetMinutes": {
             "type": "integer",
             "nullable": true,
-            "description": "Offset in minutes applied when the local times were converted to UTC, or null. Recorded so the backend can re-project the window when the offset changes (DST, #995)."
+            "description": "Offset in minutes applied when the local times were converted to UTC, or null. Recorded so the backend can re-project the window when the offset changes (DST)."
           }
         }
       },
@@ -6575,7 +7495,7 @@
               },
               "isFirstRoute": {
                 "type": "boolean",
-                "description": "Only on create. True when this is the first route of the organization, decided atomically server-side (#937)."
+                "description": "Only on create. True when this is the first route of the organization, decided atomically server-side."
               },
               "timeWindows": {
                 "type": "array",
@@ -6698,13 +7618,13 @@
           },
           "version": {
             "type": "integer",
-            "description": "Optimistic-concurrency counter. Send it back as `expectedVersion` on update (#936)."
+            "description": "Optimistic-concurrency counter. Send it back as `expectedVersion` on update."
           },
           "archivedAt": {
             "type": "string",
             "format": "date-time",
             "nullable": true,
-            "description": "When the route was archived because it has history (#1283); null while in use. An archived route is inactive and left out of lists unless `includeArchived=true`."
+            "description": "When the route was archived because it has history; null while in use. An archived route is inactive and left out of lists unless `includeArchived=true`."
           },
           "createdAt": {
             "type": "string"
@@ -6713,6 +7633,39 @@
             "type": "string"
           }
         }
+      },
+      "AgentProposalItem": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "Name of the catalogue action."
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Parameters of the action: must be a JSON object (not an array or a bare value). Its JSON is at most 16384 bytes (400 PARAMS_TOO_LARGE)."
+          },
+          "organizationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "Organization the action affects. If given, the user must belong to it (any role); otherwise 403 ORGANIZATION_NOT_ALLOWED."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "required": [
+          "action",
+          "params"
+        ]
       },
       "PlanPricing": {
         "type": "object",
@@ -6726,7 +7679,7 @@
           },
           "includedCheckpoints": {
             "type": "integer",
-            "description": "Checkpoints incluidos en el precio base."
+            "description": "Checkpoints included in the base price."
           },
           "monthly": {
             "type": "object",
@@ -6760,7 +7713,7 @@
                   "eur",
                   "usd"
                 ],
-                "description": "Coste de CADA checkpoint por encima de los incluidos."
+                "description": "Cost of EACH checkpoint above the included ones."
               }
             },
             "required": [
@@ -6806,11 +7759,11 @@
               "base",
               "extra"
             ],
-            "description": "Importes anuales ya multiplicados. Derivados del mensual, igual que los precios que sync-stripe-tiers crea en Stripe."
+            "description": "Yearly amounts, already multiplied. Derived from the monthly ones, like the yearly prices that are actually charged."
           },
           "monthsBilledYearly": {
             "type": "integer",
-            "description": "Meses que se pagan al elegir anual (12 - esto = meses regalados)."
+            "description": "Months paid when choosing yearly billing (12 minus this = free months)."
           }
         },
         "required": [
