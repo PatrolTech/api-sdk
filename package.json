@@ -1,6 +1,6 @@
 {
   "name": "@patroltech/sdk-api",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Official TypeScript SDK for the PatrolTech public REST API, generated from its OpenAPI contract",
   "license": "MIT",
   "author": "Ingenieros Web SL <info@patroltech.app>",
@@ -47,7 +47,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "generate": "orval --config orval.config.ts && node scripts/encode-path-params.mjs",
+    "generate": "node scripts/check-contract.mjs openapi/openapi.public.json && orval --config orval.config.ts && node scripts/encode-path-params.mjs",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && npm run generate && npm run build:esm && npm run build:cjs",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json && node -e \"require('node:fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }))\"",
@@ -58,7 +58,7 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "orval": "8.8.0",
+    "orval": "8.22.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "vitest": "5.0.5"

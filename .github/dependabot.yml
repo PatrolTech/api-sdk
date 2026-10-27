@@ -6,11 +6,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # orval may be bumped here: CI fails if the generated client loses an
+    # operation of the contract (src/contract.spec.ts).
     ignore:
-      # Pinned to the version of PatrolTech's internal SDK: a newer orval can
-      # drop operations from the generated client. Bump it on purpose, together.
-      - dependency-name: orval
-      - dependency-name: '@orval/*'
       # A TypeScript major changes the emitted code and module options: on purpose too.
       - dependency-name: typescript
         update-types: ['version-update:semver-major']
