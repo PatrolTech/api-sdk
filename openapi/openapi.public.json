@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "PatrolTech Public API",
-    "version": "1.0.0",
-    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope."
+    "version": "1.1.0",
+    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
   },
   "servers": [
     {
@@ -251,6 +251,40 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/routes/timewindows/{timeWindowId}": {
+      "delete": {
+        "operationId": "removeTimeWindowFromRoute",
+        "summary": "Remove time window from route",
+        "description": "Needs EDITOR on the route's location (or in its organization). A route with a location also needs its organization linked to that location as `owner` or `provider`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "timeWindowId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Time window removed from route"
+          },
+          "403": {
+            "description": "No EDITOR role on the route's location (nor in its organization), the route's organization is not linked to its location as `owner` or `provider`, or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+          },
+          "404": {
+            "description": "Time window not found, or its route no longer exists"
           }
         }
       }
@@ -567,6 +601,94 @@
         }
       }
     },
+    "/api/user-roles/{userRoleId}": {
+      "put": {
+        "operationId": "updateUserRole",
+        "summary": "Update the role type of an existing user role",
+        "description": "Needs a genuine ADMIN role in the organization the role belongs to (for a location role, the organization of that location). Promoting a VIEWER to EDITOR or ADMIN takes a manager seat and goes through the plan limit (402).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "userRoleId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role type"
+          },
+          "402": {
+            "description": "`code: USER_LIMIT_REACHED`: promoting a VIEWER to EDITOR or ADMIN would exceed the plan's `max_users`. The body carries `limit`, `currentUsage` and `upsell`. Nothing changes."
+          },
+          "403": {
+            "description": "Not an ADMIN of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never gives or changes a role, even with the write scope. Also when the role does not exist and the body does not name its organization (`Organization could not be resolved`): its organization cannot be resolved, so it is refused before looking further."
+          },
+          "404": {
+            "description": "User role not found (only reachable when the body carries an `organizationId` the caller administers)"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteUserRole",
+        "summary": "Remove a role from a user",
+        "description": "Needs a genuine ADMIN role in the organization the role belongs to (for a location role, the organization of that location).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "userRoleId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role removed"
+          },
+          "403": {
+            "description": "Not an ADMIN of the organization, the role does not exist (its organization cannot be resolved: `Organization could not be resolved`), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+          },
+          "404": {
+            "description": "User role not found (only reachable when the body carries an `organizationId` the caller administers)"
+          }
+        }
+      }
+    },
     "/api/organizations/users": {
       "get": {
         "operationId": "getOrganizationUsers",
@@ -598,11 +720,63 @@
               }
             }
           },
-          "400": {
-            "description": "Organization ID is required"
-          },
           "403": {
             "description": "No access to this organization"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOrganizationUser",
+        "summary": "Create a user and assign them to an organization",
+        "description": "Needs a genuine ADMIN role in `organizationId`. A new email creates the account and sends it an invitation to set its password; an existing one only gets the role (and a notification). An EDITOR or ADMIN role takes a manager seat and goes through the plan limit (402); VIEWER never does.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgUserBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role assigned to an existing user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true,
+                  "description": "Always null: the user is not returned. `meta.emailSent` (only for a new account) says whether the invitation email went out."
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "User created and role assigned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true,
+                  "description": "Always null: the user is not returned. `meta.emailSent` (only for a new account) says whether the invitation email went out."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing email, LOCATION role without locationId, or the person already has a role on that scope (or the new account is invalid, e.g. without `name`)"
+          },
+          "402": {
+            "description": "`code: USER_LIMIT_REACHED`: an EDITOR or ADMIN role would exceed the plan's `max_users`. The body carries `limit`, `currentUsage` and `upsell`. Nothing is created."
+          },
+          "403": {
+            "description": "Not an ADMIN of the organization (also without `organizationId`: `Organization could not be resolved`), or locationId is not a location of this organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never invites or assigns anyone, even with the write scope"
+          },
+          "409": {
+            "description": "meta.errorCode ACCOUNT_DELETED: the email belongs to a deleted account. The role is not assigned; the person has to contact support to recover it."
           }
         }
       }
@@ -858,6 +1032,124 @@
           },
           "404": {
             "description": "Checkpoint not found"
+          }
+        }
+      }
+    },
+    "/api/checkpoints/{id}/archive": {
+      "post": {
+        "operationId": "archiveCheckpoint",
+        "summary": "Archive a checkpoint (history preserved; cannot be assigned to new rounds)",
+        "description": "Takes the checkpoint off every route it was on (positions are closed up and the rounds in progress on those routes are cancelled). A route left without checkpoints is deactivated. `affectedRoutes` lists those routes.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoint archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveCheckpointResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+          },
+          "404": {
+            "description": "Checkpoint not found"
+          },
+          "409": {
+            "description": "Checkpoint is already archived"
+          }
+        }
+      }
+    },
+    "/api/checkpoints/{id}/unarchive": {
+      "post": {
+        "operationId": "unarchiveCheckpoint",
+        "summary": "Unarchive a checkpoint",
+        "description": "Devolver un checkpoint al conteo activo es, para el plan, indistinguible de crearlo: pasa por el mismo límite (402 en el tope de Free) y cobra el extra igual (409 de confirmación).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnarchiveCheckpointBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkpoint unarchived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "`code: CHECKPOINT_LIMIT_REACHED`: a Free plan at its checkpoint limit (unarchiving counts as creating one). The body carries `limit`, `currentUsage` and `upsell`. It stays archived."
+          },
+          "403": {
+            "description": "No EDITOR role on the checkpoint location (nor in its organization), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+          },
+          "404": {
+            "description": "Checkpoint not found"
+          },
+          "409": {
+            "description": "Checkpoint is not archived, the extra charge needs confirming (EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED), or VERIFICATION_CODE_TAKEN when a live checkpoint of the organization took its code while it was archived (body below). LOCATION_ARCHIVED when its location is archived: restore the location first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VerificationCodeTaken"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CheckpointLocationArchivedConflict"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`code: BILLING_UPDATE_FAILED`: the confirmed extra charge could not be billed. Nothing was charged and it stays archived: retry."
           }
         }
       }
@@ -1415,6 +1707,174 @@
           },
           "404": {
             "description": "Incident not found"
+          }
+        }
+      }
+    },
+    "/api/payments/prices": {
+      "get": {
+        "operationId": "getPaymentPrices",
+        "summary": "Catálogo de planes activos con su pricing por checkpoints",
+        "description": "Catálogo público: no exige autenticación. Sin sesión, `organizationId` se ignora y los precios salen en la moneda del país (`country` o el de la petición). Con sesión, la moneda de `organizationId` solo se usa si el usuario es de esa organización; si no, se ignora igual: no revela en qué moneda factura otra organización. Si la petición trae `Authorization`, el token tiene que ser válido (401 si no).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organización del usuario autenticado para la que se resuelven los precios: `price` y `currency` salen en SU moneda, la misma que le cobrará el proveedor de pagos. Sin sesión, o de una organización ajena, se ignora."
+            },
+            "required": false,
+            "description": "Organización del usuario autenticado para la que se resuelven los precios: `price` y `currency` salen en SU moneda, la misma que le cobrará el proveedor de pagos. Sin sesión, o de una organización ajena, se ignora.",
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "description": "País de facturación ISO 3166-1 alpha-2 que el cliente eligió en el selector de planes. Si llega, manda sobre la moneda de la organización: es lo que permite re-preciar al cambiar de país. Sin él se usa la moneda de la organización y, si no se conoce, el país de la IP (`CF-IPCountry`)."
+            },
+            "required": false,
+            "description": "País de facturación ISO 3166-1 alpha-2 que el cliente eligió en el selector de planes. Si llega, manda sobre la moneda de la organización: es lo que permite re-preciar al cambiar de país. Sin él se usa la moneda de la organización y, si no se conoce, el país de la IP (`CF-IPCountry`).",
+            "name": "country",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Planes activos. `price`/`currency` en la moneda de la organización; importes de `pricing` en cents, con eur y usd por si el consumidor necesita los dos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentPricesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/checkout-session": {
+      "post": {
+        "operationId": "createCheckoutSession",
+        "summary": "Abre un checkout de Stripe para una organización que aún no paga",
+        "description": "La organización va en la cabecera `x-organization-id`. ADMIN. Solo para organizaciones sin suscripción viva: quien ya paga cambia de plan desde el panel. Generar la sesión no cobra nada: se paga en la página del proveedor y el plan se activa al pagar. Si la organización ya tiene más checkpoints de los incluidos en el plan, la sesión cobra también los extra.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query)."
+            },
+            "required": true,
+            "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query).",
+            "name": "x-organization-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckoutSessionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesión de checkout creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCheckoutSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ORGANIZATION_ID_REQUIRED, VALIDATION_ERROR o CHECKOUT_SESSION_FAILED (el plan no es de pago, o ni la organización ni el usuario tienen email de facturación)"
+          },
+          "403": {
+            "description": "ORGANIZATION_ACCESS_DENIED (sin rol en la organización) o INSUFFICIENT_ORGANIZATION_ROLE (no es ADMIN). AGENT_CANNOT_MANAGE_BILLING: una sesión de agente MCP (via: 'mcp') no gestiona la facturación (pagar, cambiar de plan, cancelar, reanudar ni abrir el portal); solo la sesión del propio usuario. No se cambió nada"
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND o LICENSE_TIER_NOT_FOUND"
+          },
+          "409": {
+            "description": "ALREADY_SUBSCRIBED: change the plan from the dashboard (la organización ya paga una suscripción y no se abre otra). BILLING_BUSY (la facturación del cliente se está actualizando: reintentar en unos segundos) o LICENSE_CONCURRENT_MODIFICATION (otro proceso cambió la licencia a la vez: reintentar)"
+          },
+          "502": {
+            "description": "BILLING_PROVIDER_ERROR: el proveedor de pagos rechazó (o no atendió) la petición. No se cobró nada; una sesión de pago anterior pudo quedar cerrada. Se puede reintentar."
+          }
+        }
+      }
+    },
+    "/api/payments/customer-portal": {
+      "post": {
+        "operationId": "createCustomerPortalSession",
+        "summary": "Abre una sesión del portal de cliente de Stripe (método de pago, facturación)",
+        "description": "La organización va en la cabecera `x-organization-id` (por compatibilidad también en el body o la query). ADMIN.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query)."
+            },
+            "required": true,
+            "description": "Organización sobre la que se opera. Es la forma documentada de indicarla (por compatibilidad también vale `organizationId` en el body o la query).",
+            "name": "x-organization-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomerPortalSessionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "URL de la sesión del portal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCustomerPortalSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ORGANIZATION_ID_REQUIRED o VALIDATION_ERROR (returnUrl)"
+          },
+          "403": {
+            "description": "ORGANIZATION_ACCESS_DENIED (sin rol en la organización) o INSUFFICIENT_ORGANIZATION_ROLE (no es ADMIN). AGENT_CANNOT_MANAGE_BILLING: una sesión de agente MCP (via: 'mcp') no gestiona la facturación (pagar, cambiar de plan, cancelar, reanudar ni abrir el portal); solo la sesión del propio usuario. No se cambió nada"
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MISSING_STRIPE_CUSTOMER — la organización aún no es cliente del proveedor de pagos (nunca abrió un checkout): no hay portal que abrir"
+          },
+          "502": {
+            "description": "BILLING_PROVIDER_ERROR: el proveedor de pagos rechazó (o no atendió) la petición. No se abrió el portal ni se cobró nada. Se puede reintentar."
           }
         }
       }
@@ -2021,6 +2481,48 @@
             "description": "Location not found"
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteLocation",
+        "summary": "Delete a location",
+        "description": "Needs ADMIN on the location (or in its organization). Only a location without history can be deleted. One with scans, scanned checkpoints or routes with rounds or alerts is refused with 409 LOCATION_HAS_HISTORY before anything is deleted, and must be archived instead (`POST /api/locations/{id}/archive`). Deleting it deletes its checkpoints and routes too.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Location deleted"
+          },
+          "403": {
+            "description": "Insufficient permissions (no ADMIN role), or `meta.errorCode: AGENT_WRITE_NOT_ALLOWED`: an MCP agent session (via: 'mcp') never makes this write, even with the write scope"
+          },
+          "404": {
+            "description": "Location not found"
+          },
+          "409": {
+            "description": "`LAST_LOCATION`: it is the organization's last active location (archived ones do not count); an organization keeps at least one. `LOCATION_HAS_HISTORY`: it has history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationConflict"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/patrollers": {
@@ -2096,14 +2598,51 @@
               }
             }
           },
-          "400": {
-            "description": "organizationId is required"
-          },
           "403": {
             "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
           },
           "404": {
             "description": "Location not found"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPatroller",
+        "summary": "Create a patroller",
+        "description": "Needs a genuine EDITOR role (or above) in `organizationId`. The patroller is assigned to every location of the organization. Patrollers are unlimited on every plan.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePatrollerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Patroller created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatrollerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: the body does not match the schema"
+          },
+          "403": {
+            "description": "Not an EDITOR of the organization, or meta.errorCode AGENT_CANNOT_GRANT_ACCESS: an MCP agent session (via: 'mcp') never adds or restores a guard, whose app signs in with its identifier. Also without `organizationId` (`Organization could not be resolved`)"
+          },
+          "409": {
+            "description": "`code: PATROLLER_IDENTIFIER_TAKEN`: the `identifier` sent is already used by another patroller (it is unique across PatrolTech). Nothing is created: send another or omit it."
           }
         }
       }
@@ -2147,6 +2686,176 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Patroller not found"
+          }
+        }
+      }
+    },
+    "/api/patrollers/identifier/{identifier}": {
+      "get": {
+        "operationId": "getPatrollerByIdentifier",
+        "summary": "Get a patroller by their identifier",
+        "description": "The identifier is unique across PatrolTech and is what the guard app signs in with, so the lookup never reveals one the caller may not see: a patroller of an organization where the caller has no genuine role, and any patroller for a VIEWER whose organization hides part of the patrollers' identity (visibility policy), get the same 404 as an identifier that does not exist.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patroller retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatrollerResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patroller not found, not in an organization of the caller's, or hidden from a VIEWER by the visibility policy: the same answer for all three"
+          }
+        }
+      }
+    },
+    "/api/patrollers/ranking": {
+      "get": {
+        "operationId": "getPatrollerRanking",
+        "summary": "Get patroller ranking with scan and round metrics",
+        "description": "VIEWER or above. With `locationId`, a role on that location is enough and the ranking only counts its scans and rounds. The window is clamped to the plan's data retention (`retentionCutoff`). For a VIEWER under the patroller visibility policy, a hidden name comes as the organization's alias (or blank), a hidden identifier blank, and with the name hidden `patrollerId` comes null.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patroller ranking retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatrollerRankingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`from`/`to` is not a date, or `locationId` is repeated"
+          },
+          "403": {
+            "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
+          },
+          "404": {
+            "description": "Location not found"
+          }
+        }
+      }
+    },
+    "/api/patrollers/{id}/stats": {
+      "get": {
+        "operationId": "getPatrollerStats",
+        "summary": "Get individual patroller statistics",
+        "description": "Needs a genuine role (VIEWER or above) in the patroller's organization.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patroller stats retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatrollerStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`from`/`to` is not a date"
+          },
+          "403": {
+            "description": "No role in the patroller's organization"
           },
           "404": {
             "description": "Patroller not found"
@@ -2280,9 +2989,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Organization ID is required"
           },
           "403": {
             "description": "Without `locationId`: no genuine role in the organization (a user whose only role is on a location must send `locationId`). With `locationId`: no role on that location (nor in its organization), or the location does not belong to `organizationId`"
@@ -2655,6 +3361,61 @@
           "whatsappPhone"
         ]
       },
+      "UpdateUserRoleBody": {
+        "type": "object",
+        "properties": {
+          "roleType": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "EDITOR",
+              "VIEWER"
+            ]
+          }
+        },
+        "required": [
+          "roleType"
+        ]
+      },
+      "UserRoleResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roleType": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "EDITOR",
+              "VIEWER"
+            ]
+          },
+          "roleScope": {
+            "type": "string",
+            "enum": [
+              "ORGANIZATION",
+              "LOCATION"
+            ]
+          },
+          "scopeId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "roleType",
+          "roleScope",
+          "scopeId"
+        ]
+      },
       "OrgUsersResponse": {
         "type": "object",
         "properties": {
@@ -2728,6 +3489,60 @@
           "results",
           "count",
           "totalPages"
+        ]
+      },
+      "CreateOrgUserBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Ignored: the server always generates the id of a new user."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Matched case-insensitively against existing users; stored lower-cased."
+          },
+          "phone": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roleType": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "EDITOR",
+              "VIEWER"
+            ],
+            "default": "VIEWER",
+            "description": "Omitted (or not a role): VIEWER, least privilege. VIEWER does not use a manager seat of the plan."
+          },
+          "roleScope": {
+            "type": "string",
+            "enum": [
+              "ORGANIZATION",
+              "LOCATION"
+            ],
+            "default": "ORGANIZATION"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required when roleScope is LOCATION; must be a location of (or linked to) organizationId."
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "organizationId"
         ]
       },
       "SupportSummary": {
@@ -3472,6 +4287,228 @@
                 ]
               }
             }
+          }
+        }
+      },
+      "ArchiveCheckpointResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "qrCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "fraudRules": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "gpsProximity": {
+                "type": "object",
+                "properties": {
+                  "maxDistanceMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "maxAccuracyMeters": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                },
+                "required": [
+                  "maxDistanceMeters"
+                ]
+              },
+              "undergroundMode": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "verificationMethod": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "qr_static",
+                  "nfc_uid",
+                  "manual_code",
+                  "geofence",
+                  "nfc_sun",
+                  "nfc_url_signed",
+                  "ble_beacon",
+                  "iot_button",
+                  "photo_evidence",
+                  "qr_dynamic"
+                ]
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "securityLevel": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "provisioningStatus": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "key_generated",
+                  "chip_assigned",
+                  "provisioned",
+                  "failed",
+                  "revoked"
+                ]
+              },
+              "provisionedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "lastProvisioningError": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "active",
+              "securityLevel",
+              "config",
+              "provisioningStatus",
+              "provisionedAt",
+              "lastProvisioningError"
+            ]
+          },
+          "firstScanAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "supersededById": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "isLocked": {
+            "type": "boolean"
+          },
+          "affectedRoutes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "leftEmpty": {
+                  "type": "boolean",
+                  "description": "No checkpoint is left on the route."
+                },
+                "deactivated": {
+                  "type": "boolean",
+                  "description": "The route was active and archiving deactivated it for being left without checkpoints."
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "leftEmpty",
+                "deactivated"
+              ]
+            },
+            "description": "Routes the checkpoint was taken off (empty when it was on none). A route left without checkpoints is deactivated."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "locationId",
+          "affectedRoutes"
+        ]
+      },
+      "UnarchiveCheckpointBody": {
+        "type": "object",
+        "properties": {
+          "confirmExtraBilling": {
+            "type": "boolean",
+            "description": "Acepta el cargo del checkpoint extra. Necesario cuando la respuesta previa fue 409 EXTRA_CHECKPOINT_CONFIRMATION_REQUIRED."
           }
         }
       },
@@ -4221,6 +5258,143 @@
           "assignToUserId"
         ]
       },
+      "PaymentPricesResponse": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tierId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Lo que se manda a `createCheckoutSession` para contratar este plan."
+            },
+            "tierName": {
+              "type": "string"
+            },
+            "tierIdentifier": {
+              "type": "string"
+            },
+            "price": {
+              "type": "number",
+              "description": "Precio base mensual en unidades mayores (no cents), en `currency`."
+            },
+            "currency": {
+              "type": "string"
+            },
+            "billingInterval": {
+              "type": "string"
+            },
+            "features": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            },
+            "pricing": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PlanPricing"
+                },
+                {
+                  "nullable": true,
+                  "description": "null para Free o para un plan legacy fuera del price book."
+                }
+              ]
+            }
+          },
+          "required": [
+            "tierId",
+            "tierName",
+            "tierIdentifier",
+            "price",
+            "currency",
+            "billingInterval",
+            "features",
+            "limits",
+            "pricing"
+          ]
+        }
+      },
+      "CreateCheckoutSessionBody": {
+        "type": "object",
+        "properties": {
+          "tierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ],
+            "default": "month",
+            "description": "Cadencia de facturación elegida por el usuario."
+          },
+          "successUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "cancelUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "country": {
+            "type": "string",
+            "nullable": true,
+            "description": "País ISO-2 confirmado en el selector de planes. Si la organización ya tiene la moneda fijada, se ignora."
+          }
+        },
+        "required": [
+          "tierId",
+          "successUrl",
+          "cancelUrl"
+        ]
+      },
+      "CreateCheckoutSessionResponse": {
+        "type": "object",
+        "properties": {
+          "sessionUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Página de pago del proveedor. Caduca a los 45 minutos."
+          }
+        },
+        "required": [
+          "sessionUrl"
+        ]
+      },
+      "CreateCustomerPortalSessionBody": {
+        "type": "object",
+        "properties": {
+          "returnUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "A dónde vuelve el usuario al salir del portal del proveedor de pagos."
+          }
+        },
+        "required": [
+          "returnUrl"
+        ]
+      },
+      "CreateCustomerPortalSessionResponse": {
+        "type": "object",
+        "properties": {
+          "sessionUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "sessionUrl"
+        ]
+      },
       "GetLicenseInfoResponse": {
         "type": "object",
         "properties": {
@@ -4883,6 +6057,42 @@
           "address"
         ]
       },
+      "LocationConflict": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "LAST_LOCATION",
+              "LOCATION_HAS_HISTORY",
+              "LOCATION_ALREADY_ARCHIVED",
+              "LOCATION_NOT_ARCHIVED"
+            ]
+          },
+          "data": {
+            "nullable": true
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "code",
+          "data",
+          "error"
+        ]
+      },
       "ListPatrollersResponse": {
         "type": "object",
         "properties": {
@@ -4962,11 +6172,17 @@
           "totalPages"
         ]
       },
-      "UpdatePatrollerBody": {
+      "CreatePatrollerBody": {
         "type": "object",
         "properties": {
           "name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "identifier": {
+            "type": "string",
+            "maxLength": 8,
+            "description": "What the guard app signs in with, unique across PatrolTech (at most 8 characters, the size of the column). Omitted: the server generates one (8 upper-case hex characters)."
           },
           "email": {
             "type": "string",
@@ -4976,8 +6192,16 @@
           "phone": {
             "type": "string",
             "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
           }
-        }
+        },
+        "required": [
+          "name",
+          "organizationId"
+        ]
       },
       "PatrollerResponse": {
         "type": "object",
@@ -5037,6 +6261,186 @@
           "organizationId",
           "createdAt",
           "status"
+        ]
+      },
+      "UpdatePatrollerBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "PatrollerRankingResponse": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "object",
+            "properties": {
+              "totalScans": {
+                "type": "integer"
+              },
+              "activePatrollers": {
+                "type": "integer"
+              },
+              "avgScansPerPatroller": {
+                "type": "number"
+              },
+              "bestCompletionRate": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "totalScans",
+              "activePatrollers",
+              "avgScansPerPatroller",
+              "bestCompletionRate"
+            ]
+          },
+          "ranking": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "patrollerId": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uuid"
+                },
+                "patrollerName": {
+                  "type": "string"
+                },
+                "patrollerIdentifier": {
+                  "type": "string"
+                },
+                "totalScans": {
+                  "type": "integer"
+                },
+                "roundsCompleted": {
+                  "type": "integer"
+                },
+                "completionRate": {
+                  "type": "number"
+                },
+                "avgTimeBetweenScans": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "archived": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "patrollerId",
+                "patrollerName",
+                "patrollerIdentifier",
+                "totalScans",
+                "roundsCompleted",
+                "completionRate",
+                "avgTimeBetweenScans",
+                "archived"
+              ]
+            }
+          },
+          "topCheckpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "checkpointName": {
+                  "type": "string"
+                },
+                "totalScans": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "checkpointName",
+                "totalScans"
+              ]
+            }
+          },
+          "retentionCutoff": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "Earliest instant the plan's data retention lets the ranking count; null when unlimited."
+          }
+        },
+        "required": [
+          "summary",
+          "ranking",
+          "topCheckpoints",
+          "retentionCutoff"
+        ]
+      },
+      "PatrollerStatsResponse": {
+        "type": "object",
+        "properties": {
+          "totalScans": {
+            "type": "integer"
+          },
+          "roundsCompleted": {
+            "type": "integer"
+          },
+          "totalRounds": {
+            "type": "integer"
+          },
+          "completionRate": {
+            "type": "number"
+          },
+          "avgTimeBetweenScans": {
+            "type": "number",
+            "nullable": true
+          },
+          "scansByDay": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "date",
+                "count"
+              ]
+            }
+          },
+          "incidentsReported": {
+            "type": "integer"
+          },
+          "incidentsOpen": {
+            "type": "integer"
+          },
+          "retentionCutoff": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "Days of `scansByDay` before this instant are outside the plan's data retention; null when unlimited."
+          }
+        },
+        "required": [
+          "totalScans",
+          "roundsCompleted",
+          "totalRounds",
+          "completionRate",
+          "avgTimeBetweenScans",
+          "scansByDay",
+          "retentionCutoff"
         ]
       },
       "ListScansResponse": {
@@ -5304,6 +6708,113 @@
             "type": "string"
           }
         }
+      },
+      "PlanPricing": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "enum": [
+              "pro",
+              "business"
+            ]
+          },
+          "includedCheckpoints": {
+            "type": "integer",
+            "description": "Checkpoints incluidos en el precio base."
+          },
+          "monthly": {
+            "type": "object",
+            "properties": {
+              "base": {
+                "type": "object",
+                "properties": {
+                  "eur": {
+                    "type": "integer"
+                  },
+                  "usd": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "eur",
+                  "usd"
+                ]
+              },
+              "extra": {
+                "type": "object",
+                "properties": {
+                  "eur": {
+                    "type": "integer"
+                  },
+                  "usd": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "eur",
+                  "usd"
+                ],
+                "description": "Coste de CADA checkpoint por encima de los incluidos."
+              }
+            },
+            "required": [
+              "base",
+              "extra"
+            ]
+          },
+          "yearly": {
+            "type": "object",
+            "properties": {
+              "base": {
+                "type": "object",
+                "properties": {
+                  "eur": {
+                    "type": "integer"
+                  },
+                  "usd": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "eur",
+                  "usd"
+                ]
+              },
+              "extra": {
+                "type": "object",
+                "properties": {
+                  "eur": {
+                    "type": "integer"
+                  },
+                  "usd": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "eur",
+                  "usd"
+                ]
+              }
+            },
+            "required": [
+              "base",
+              "extra"
+            ],
+            "description": "Importes anuales ya multiplicados. Derivados del mensual, igual que los precios que sync-stripe-tiers crea en Stripe."
+          },
+          "monthsBilledYearly": {
+            "type": "integer",
+            "description": "Meses que se pagan al elegir anual (12 - esto = meses regalados)."
+          }
+        },
+        "required": [
+          "plan",
+          "includedCheckpoints",
+          "monthly",
+          "yearly",
+          "monthsBilledYearly"
+        ]
       },
       "LicenseUsage": {
         "type": "object",
