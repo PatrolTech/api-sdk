@@ -58,7 +58,7 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "orval": "8.22.0",
+    "orval": "8.43.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
