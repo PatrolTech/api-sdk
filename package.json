@@ -66,5 +66,8 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"
+  },
+  "overrides": {
+    "js-yaml": "4.3.2"
   }
 }
