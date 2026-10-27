@@ -4,7 +4,7 @@ name: Release
 # package.json is not on npm yet: on a merge to main that changes it, or by hand
 # on main. Then creates the `v<version>` tag and GitHub release (also later, if
 # that step failed after publishing). Pushing a tag publishes nothing on purpose:
-# only code reviewed into main may run with NPM_TOKEN.
+# only what reached main through a pull request with green CI may publish.
 on:
   push:
     branches: [main]
@@ -86,10 +86,12 @@ jobs:
     needs: [check, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # NPM_TOKEN lives in this environment, limited to main.
+    # Credentials live in this environment, limited to main: the variable
+    # NPM_TRUSTED_PUBLISHING=true (npm trusted publishing, OIDC, no token to
+    # renew) or, until that is set up, the secret NPM_TOKEN.
     environment: npm
     permissions:
-      id-token: write # npm provenance
+      id-token: write # trusted publishing and npm provenance
     outputs:
       published: ${{ steps.publish.outputs.published }}
     steps:
@@ -105,10 +107,19 @@ jobs:
       - name: Publish to npm
         id: publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::notice title=npm publish skipped::NPM_TOKEN is not set in the npm environment. Add it and run this workflow again."
+          if [ "$TRUSTED_PUBLISHING" = true ]; then
+            # Trusted publishing needs npm 11.5.1 or later.
+            if ! node -e "const [a, b, c] = process.argv[1].split('.').map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)" "$(npm --version)"; then
+              echo "::error::npm $(npm --version) cannot use trusted publishing (needs 11.5.1 or later)."
+              exit 1
+            fi
+          elif [ -n "$NPM_TOKEN" ]; then
+            export NODE_AUTH_TOKEN="$NPM_TOKEN"
+          else
+            echo "::notice title=npm publish skipped::Neither NPM_TRUSTED_PUBLISHING=true nor NPM_TOKEN is set in the npm environment. Set one and run this workflow again."
             exit 0
           fi
           npm publish ./*.tgz --provenance --access public --ignore-scripts

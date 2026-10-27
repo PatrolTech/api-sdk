@@ -82,7 +82,7 @@ await listScans({ organizationId }, client.init());
 ## Versioning
 
 - The contract has its own semantic version (`info.version`). A breaking change in the API requires a new major version of the contract.
-- Each contract change reaches this repository as a pull request; once merged, a new SDK version is published to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements). A new major version of the contract means a new major version of the SDK.
+- Each contract change reaches this repository automatically as a pull request with the version bump. When its CI passes it merges itself and the new SDK version is published to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements). A new major version of the contract means a new major version of the SDK.
 
 ## Contributing
 
