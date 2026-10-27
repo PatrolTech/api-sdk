@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "PatrolTech Public API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
   },
   "servers": [
@@ -5630,6 +5630,10 @@
               "EUR",
               "USD"
             ]
+          },
+          "hasActiveSubscription": {
+            "type": "boolean",
+            "description": "True when the organization already pays a live subscription with the payment provider (active, trialing or past due, including one set to cancel at period end), the same rule that makes checkout answer ALREADY_SUBSCRIBED. False for a free plan, a bonus, or a cancelled or expired subscription. Use it to offer subscription management instead of a new checkout."
           }
         },
         "required": [
@@ -5639,7 +5643,8 @@
           "trialDaysRemaining",
           "canUpgradeTo",
           "usage",
-          "currency"
+          "currency",
+          "hasActiveSubscription"
         ]
       },
       "OAuthAuthorizationServerMetadata": {
