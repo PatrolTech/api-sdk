@@ -4,7 +4,7 @@ name: Release
 # package.json is not on npm yet: on a merge to main that changes it, or by hand
 # on main. Then creates the `v<version>` tag and GitHub release (also later, if
 # that step failed after publishing). Pushing a tag publishes nothing on purpose:
-# only code reviewed into main may run with NPM_TOKEN.
+# only what reached main through a pull request with green CI may publish.
 on:
   push:
     branches: [main]

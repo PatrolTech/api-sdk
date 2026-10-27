@@ -31,6 +31,16 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # The automated contract PR merges itself: it may only bring the contract
+      # and the version. The check runs main's copy of the script, so the PR
+      # cannot change it (and its token cannot change workflows).
+      - name: Check the scope of the contract-sync pull request
+        if: github.head_ref == 'contract-sync'
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          git show origin/main:scripts/check-contract-sync-scope.mjs > "$RUNNER_TEMP/check-scope.mjs"
+          node "$RUNNER_TEMP/check-scope.mjs" origin/main
+
       # No install scripts: nothing in the toolchain needs them.
       - run: npm ci --ignore-scripts
 
