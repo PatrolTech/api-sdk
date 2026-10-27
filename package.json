@@ -1,6 +1,6 @@
 {
   "name": "@patroltech/sdk-api",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Official TypeScript SDK for the PatrolTech public REST API, generated from its OpenAPI contract",
   "license": "MIT",
   "author": "Ingenieros Web SL <info@patroltech.app>",
