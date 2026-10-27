@@ -64,7 +64,7 @@ See [`examples/quick-start.ts`](./examples/quick-start.ts).
 - Every function returns `{ data, status, headers }`. For `/api/*` the `{ success, message, data }` envelope is unwrapped, so `data` is the payload described by the contract. `/oauth/*` responses are plain JSON, as in the OAuth RFCs.
 - A non-2xx response throws an `ApiError` with `status`, `message` and the response body in `data` (its type is exported as `ApiErrorBody`). Checking `response.status === 200` only narrows the TypeScript type.
 - A `423` for a suspended organization also calls `onSuspended(body)` if you configured it.
-- Path parameters are sent as given: an id with `.` or `..` segments or a backslash is refused with a `TypeError` before any request, so untrusted input cannot reach another endpoint with your token.
+- Path parameters are percent-encoded (`x/details` stays one segment), and an id that is exactly `.` or `..` is refused with a `TypeError` before any request, so untrusted input cannot reach another endpoint with your token.
 
 ### One configuration per request
 
