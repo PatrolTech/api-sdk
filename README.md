@@ -8,6 +8,7 @@ Official TypeScript client for the **PatrolTech public REST API**: integrate gua
 [![npm](https://img.shields.io/npm/v/@patroltech/sdk-api)](https://www.npmjs.com/package/@patroltech/sdk-api)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
+- **[API reference](https://patroltech.github.io/sdk-api/)**: every endpoint, parameter and response of the public API, browsable online.
 - **Generated from the public contract** [`openapi/openapi.public.json`](./openapi/openapi.public.json), the same document the API serves at [`https://api.patroltech.online/openapi.public.json`](https://api.patroltech.online/openapi.public.json).
 - **Typed** requests and responses, ESM and CommonJS builds, no runtime dependencies (it uses the platform `fetch`).
 - Works in Node.js 22+ (which loads the CommonJS build, for `require` and `import` alike) and in browsers through a bundler (ESM build). Types need TypeScript 5.0+.
@@ -81,6 +82,14 @@ await listScans({ organizationId }, client.init());
 
 `init()` accepts extra `RequestInit` options, such as `signal` for an `AbortController`. Pass `headers` as a plain object (`{ 'X-Request-Id': id }`), not a `Headers` instance.
 
+## Postman, Bruno or Insomnia
+
+Import the contract URL [`https://api.patroltech.online/openapi.public.json`](https://api.patroltech.online/openapi.public.json) directly in Postman, Bruno or Insomnia to try the API without writing code.
+
+## Webhooks
+
+Webhooks are in development. Tell us which events you need at **info@patroltech.app**.
+
 ## Versioning
 
 - The contract has its own semantic version (`info.version`). A breaking change in the API requires a new major version of the contract.
@@ -120,7 +129,7 @@ For Claude, ChatGPT, Cursor or Gemini to operate an existing PatrolTech account,
 
 ## En español
 
-SDK oficial en TypeScript de la API pública de PatrolTech, generado desde el contrato OpenAPI público. Instálalo con `npm install @patroltech/sdk-api`; la autenticación es OAuth con PKCE (ver [`examples/oauth.ts`](./examples/oauth.ts)). Contacto: [info@patroltech.app](mailto:info@patroltech.app).
+SDK oficial en TypeScript de la API pública de PatrolTech, generado desde el contrato OpenAPI público. Instálalo con `npm install @patroltech/sdk-api`; la autenticación es OAuth con PKCE (ver [`examples/oauth.ts`](./examples/oauth.ts)). Referencia de la API en [patroltech.github.io/sdk-api](https://patroltech.github.io/sdk-api/); el contrato [`openapi.public.json`](https://api.patroltech.online/openapi.public.json) se importa directamente en Postman, Bruno o Insomnia. Los webhooks están en desarrollo: cuéntanos qué eventos necesitas en [info@patroltech.app](mailto:info@patroltech.app).
 
 ## License
 
