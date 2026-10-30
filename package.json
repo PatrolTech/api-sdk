@@ -1,6 +1,6 @@
 {
   "name": "@patroltech/sdk-api",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Official TypeScript SDK for the PatrolTech public REST API, generated from its OpenAPI contract",
   "license": "MIT",
   "author": "Ingenieros Web SL <info@patroltech.app>",
@@ -18,7 +18,12 @@
     "security-patrol",
     "openapi",
     "sdk",
-    "typescript"
+    "typescript",
+    "checkpoints",
+    "incident-management",
+    "oauth",
+    "pkce",
+    "facility-management"
   ],
   "type": "module",
   "main": "./dist/cjs/index.js",
