@@ -12,6 +12,8 @@ Official TypeScript client for the **PatrolTech public REST API**: integrate gua
 - **Typed** requests and responses, ESM and CommonJS builds, no runtime dependencies (it uses the platform `fetch`).
 - Works in Node.js 22+ (which loads the CommonJS build, for `require` and `import` alike) and in browsers through a bundler (ESM build). Types need TypeScript 5.0+.
 
+[Create a free PatrolTech account](https://patroltech.online/en/start?utm_source=patroltech_sdk&utm_medium=referral&utm_campaign=ai_integrations&utm_content=sdk_readme_signup) · [Use PatrolTech from an AI assistant](https://patroltech.online/en/features/integrations/mcp?utm_source=patroltech_sdk&utm_medium=referral&utm_campaign=ai_integrations&utm_content=sdk_readme_mcp)
+
 ## Install
 
 ```bash
@@ -105,12 +107,16 @@ Security issues: see [SECURITY.md](./SECURITY.md). Do not include credentials, t
 
 PatrolTech is guard tour and security patrol software developed by Ingenieros Web SL in Madrid, Spain. It combines QR/NFC checkpoint recording, offline patrol records, incident reports and a management dashboard.
 
-- [Product overview](https://patroltech.online/en)
-- [Pricing and free plan](https://patroltech.online/en/pricing)
-- [Product tutorials](https://patroltech.online/en/tutorials)
+- [Product overview](https://patroltech.online/en?utm_source=patroltech_sdk&utm_medium=referral&utm_campaign=ai_integrations&utm_content=sdk_readme_product)
+- [Pricing and free plan](https://patroltech.online/en/pricing?utm_source=patroltech_sdk&utm_medium=referral&utm_campaign=ai_integrations&utm_content=sdk_readme_pricing)
+- [Product tutorials](https://patroltech.online/en/tutorials?utm_source=patroltech_sdk&utm_medium=referral&utm_campaign=ai_integrations&utm_content=sdk_readme_tutorials)
 - [PatrolTech on GitHub](https://github.com/PatrolTech)
 
 Integration enquiries: **info@patroltech.app**.
+
+## AI agents and MCP
+
+For Claude, ChatGPT, Cursor or Gemini to operate an existing PatrolTech account, use the [remote MCP connector and agent skill](https://github.com/PatrolTech/ai-integrations). Use this SDK when building your own application or agent integration against the public REST API. Both require the account owner's OAuth authorization; a package installation grants no account access.
 
 ## En español
 
