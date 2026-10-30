@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "PatrolTech Public API",
-    "version": "1.3.1",
-    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
+    "version": "2.0.0",
+    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\n2.0.0: the request property `whatsappPhone` of `PATCH /api/auth/user/preferences` is\ndeclared as what the API has always accepted (a string of 1 to 20 characters, or null);\nit was declared as any value. Nullable response fields that hold a schema reference\n(`pricing`, `usage`) are declared as `anyOf` plus `nullable`.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
   },
   "servers": [
     {
@@ -2097,6 +2097,7 @@
       "get": {
         "operationId": "getIncidentDetail",
         "summary": "Get full incident detail including timeline and media",
+        "description": "Send `locationId` or `organizationId` in the query so that access and the incident-reporting feature are checked against the incident's own location or organization. Both are optional; if both are sent, `locationId` wins. Without either, the first organization of the caller is used, which can refuse an incident of another organization (403).",
         "security": [
           {
             "bearerAuth": []
@@ -2111,6 +2112,28 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it."
+            },
+            "required": false,
+            "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it.",
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent."
+            },
+            "required": false,
+            "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent.",
+            "name": "organizationId",
+            "in": "query"
           }
         ],
         "responses": {
@@ -2134,6 +2157,7 @@
       "patch": {
         "operationId": "updateIncidentStatus",
         "summary": "Update the status of an incident",
+        "description": "Send `locationId` or `organizationId` in the query so that access and the incident-reporting feature are checked against the incident's own location or organization. Both are optional; if both are sent, `locationId` wins. Without either, the first organization of the caller is used, which can refuse an incident of another organization (403).",
         "security": [
           {
             "bearerAuth": []
@@ -2148,6 +2172,28 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it."
+            },
+            "required": false,
+            "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it.",
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent."
+            },
+            "required": false,
+            "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent.",
+            "name": "organizationId",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -2191,6 +2237,7 @@
       "post": {
         "operationId": "addIncidentComment",
         "summary": "Add a comment to an incident",
+        "description": "Send `locationId` or `organizationId` in the query so that access and the incident-reporting feature are checked against the incident's own location or organization. Both are optional; if both are sent, `locationId` wins. Without either, the first organization of the caller is used, which can refuse an incident of another organization (403).",
         "security": [
           {
             "bearerAuth": []
@@ -2205,6 +2252,28 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it."
+            },
+            "required": false,
+            "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it.",
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent."
+            },
+            "required": false,
+            "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent.",
+            "name": "organizationId",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -2240,6 +2309,7 @@
       "patch": {
         "operationId": "assignIncident",
         "summary": "Assign or unassign an incident to a user",
+        "description": "Send `locationId` or `organizationId` in the query so that access and the incident-reporting feature are checked against the incident's own location or organization. Both are optional; if both are sent, `locationId` wins. Without either, the first organization of the caller is used, which can refuse an incident of another organization (403).",
         "security": [
           {
             "bearerAuth": []
@@ -2254,6 +2324,28 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it."
+            },
+            "required": false,
+            "description": "Location the incident belongs to. When sent, the organization is taken from this location (`organizationId` is ignored) and access is checked with the caller's role on it.",
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent."
+            },
+            "required": false,
+            "description": "Organization the incident belongs to, for a caller with access to several organizations. Ignored when `locationId` is sent.",
+            "name": "organizationId",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -2341,7 +2433,7 @@
       "post": {
         "operationId": "createCheckoutSession",
         "summary": "Open a checkout with the payment provider for an organization that does not pay yet",
-        "description": "The organization goes in the `x-organization-id` header. ADMIN. Only for organizations without a live subscription: one that already pays changes plan from the dashboard. Creating the session charges nothing: payment happens on the provider's page and the plan is activated once paid. If the organization already has more checkpoints than the plan includes, the session also charges the extra ones.",
+        "description": "The organization goes in the `organizationId` query parameter or in the `x-organization-id` header: one of them is required (400 ORGANIZATION_ID_REQUIRED otherwise) and, if both are sent, the query parameter wins. For compatibility, `organizationId` in the body is also accepted and takes precedence over both. ADMIN. Only for organizations without a live subscription: one that already pays changes plan from the dashboard. Creating the session charges nothing: payment happens on the provider's page and the plan is activated once paid. If the organization already has more checkpoints than the plan includes, the session also charges the extra ones.",
         "security": [
           {
             "bearerAuth": []
@@ -2352,10 +2444,21 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted)."
+              "description": "Organization to operate on. Send it here or in the `x-organization-id` header; if both are sent, this parameter wins."
             },
-            "required": true,
-            "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted).",
+            "required": false,
+            "description": "Organization to operate on. Send it here or in the `x-organization-id` header; if both are sent, this parameter wins.",
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization to operate on. Send it here or in the `organizationId` query parameter; if both are sent, the query parameter wins."
+            },
+            "required": false,
+            "description": "Organization to operate on. Send it here or in the `organizationId` query parameter; if both are sent, the query parameter wins.",
             "name": "x-organization-id",
             "in": "header"
           }
@@ -2403,7 +2506,7 @@
       "post": {
         "operationId": "createCustomerPortalSession",
         "summary": "Open a session of the payment provider's customer portal (payment method, invoices)",
-        "description": "The organization goes in the `x-organization-id` header (for compatibility, also in the body or the query). ADMIN.",
+        "description": "The organization goes in the `organizationId` query parameter or in the `x-organization-id` header: one of them is required (400 ORGANIZATION_ID_REQUIRED otherwise) and, if both are sent, the query parameter wins. For compatibility, `organizationId` in the body is also accepted and takes precedence over both. ADMIN.",
         "security": [
           {
             "bearerAuth": []
@@ -2414,10 +2517,21 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted)."
+              "description": "Organization to operate on. Send it here or in the `x-organization-id` header; if both are sent, this parameter wins."
             },
-            "required": true,
-            "description": "Organization to operate on. This is the documented way to send it (for compatibility, `organizationId` in the body or the query is also accepted).",
+            "required": false,
+            "description": "Organization to operate on. Send it here or in the `x-organization-id` header; if both are sent, this parameter wins.",
+            "name": "organizationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Organization to operate on. Send it here or in the `organizationId` query parameter; if both are sent, the query parameter wins."
+            },
+            "required": false,
+            "description": "Organization to operate on. Send it here or in the `organizationId` query parameter; if both are sent, the query parameter wins.",
             "name": "x-organization-id",
             "in": "header"
           }
@@ -4150,16 +4264,11 @@
             }
           },
           "whatsappPhone": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 20
-              },
-              {
-                "nullable": true
-              }
-            ]
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 20,
+            "description": "Phone number for WhatsApp notifications, 1 to 20 characters; null removes it. Omit it to leave the current one unchanged."
           }
         }
       },
@@ -6217,15 +6326,13 @@
               }
             },
             "pricing": {
-              "allOf": [
+              "anyOf": [
                 {
                   "$ref": "#/components/schemas/PlanPricing"
-                },
-                {
-                  "nullable": true,
-                  "description": "null for Free, or for an older plan that is no longer sold."
                 }
-              ]
+              ],
+              "nullable": true,
+              "description": "null for Free, or for an older plan that is no longer sold."
             }
           },
           "required": [
@@ -6535,14 +6642,12 @@
             }
           },
           "usage": {
-            "allOf": [
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/LicenseUsage"
-              },
-              {
-                "nullable": true
               }
-            ]
+            ],
+            "nullable": true
           },
           "currency": {
             "type": "string",
