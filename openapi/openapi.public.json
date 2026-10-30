@@ -2,8 +2,21 @@
   "openapi": "3.0.3",
   "info": {
     "title": "PatrolTech Public API",
-    "version": "2.0.0",
-    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\n2.0.0: the request property `whatsappPhone` of `PATCH /api/auth/user/preferences` is\ndeclared as what the API has always accepted (a string of 1 to 20 characters, or null);\nit was declared as any value. Nullable response fields that hold a schema reference\n(`pricing`, `usage`) are declared as `anyOf` plus `nullable`.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it."
+    "version": "2.0.1",
+    "description": "Public subset of the PatrolTech API. Breaking changes require a major version bump.\n\n2.0.0: the request property `whatsappPhone` of `PATCH /api/auth/user/preferences` is\ndeclared as what the API has always accepted (a string of 1 to 20 characters, or null);\nit was declared as any value. Nullable response fields that hold a schema reference\n(`pricing`, `usage`) are declared as `anyOf` plus `nullable`.\n\nResponse envelope for `/api/*`: every JSON response is wrapped as\n`{ success, message, data, meta? }`. The 2xx schemas below describe `data`.\nErrors arrive as `{ success: false, message, data: null, meta }`, with the details\n(`errorCode`, `code`...) in `meta` unless the handler emitted the envelope itself.\n`/oauth/*` and `/.well-known/*` follow the OAuth RFCs: plain JSON, no envelope.\n\nResponses any `/api/*` operation can return, not repeated in each operation:\n- 401: the operation needs a bearer token and it is missing, malformed, invalid\n  (`meta.code: INVALID_TOKEN`), expired (`meta.code: TOKEN_EXPIRED`) or of a deleted\n  account (`meta.errorCode: ACCOUNT_DELETED`). Get a new token and retry.\n- 423: the organization the request targets (or all of the user’s organizations) is\n  suspended. The body is the envelope with `data: { code: ORGANIZATION_SUSPENDED,\n  organizationId, reason, scope, effectiveAt }`. Billing and account endpoints stay open.\n- 451: on a write (POST, PUT, PATCH, DELETE), the user has policies pending acceptance;\n  `meta.pending` lists them. Accept them in the dashboard and retry.\n- 429: too many requests for that endpoint. Wait and retry.\n- 500: unexpected server error. 502: a provider the operation depends on (payments)\n  failed; the operations where it can happen document it.\n\nWebhooks are in development. Tell us which events you need at info@patroltech.app;\nmeanwhile, poll the list endpoints.",
+    "contact": {
+      "name": "PatrolTech",
+      "email": "info@patroltech.app",
+      "url": "https://patroltech.online"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://github.com/PatrolTech/sdk-api/blob/main/LICENSE"
+    }
+  },
+  "externalDocs": {
+    "description": "API reference",
+    "url": "https://patroltech.github.io/sdk-api/"
   },
   "servers": [
     {
