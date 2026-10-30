@@ -82,7 +82,8 @@ await listScans({ organizationId }, client.init());
 ## Versioning
 
 - The contract has its own semantic version (`info.version`). A breaking change in the API requires a new major version of the contract.
-- Each contract change reaches this repository automatically as a pull request with the version bump. When its CI passes it merges itself and the new SDK version is published to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements). A new major version of the contract means a new major version of the SDK.
+- The SDK version follows its public TypeScript surface (exports, function signatures and exported types), not only the contract: a contract change that is compatible over HTTP can still change a signature (a new query parameter goes before `options`), and that is a new major version of the SDK. `scripts/api-surface.mjs` compares the built package with the published one; the `Public API surface` check fails a pull request whose version goes up less than its change needs. A new major version of the contract also means a new major version of the SDK.
+- Each contract change reaches this repository automatically as a pull request with that version bump and the list of signatures that change. When its CI passes, a minor or patch release merges itself and is published to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements); a major one waits for a maintainer's review.
 
 ## Contributing
 
@@ -92,8 +93,10 @@ The client is generated with [orval](https://orval.dev) from the contract: do no
 npm ci
 npm run build          # generate + compile ESM and CJS
 npm test
+npm run test:scripts   # tests of scripts/ (node --test)
 npm run examples:check
 npm run format:check
+npm run api-surface -- report   # what changes against the latest version on npm
 ```
 
 Security issues: see [SECURITY.md](./SECURITY.md). Do not include credentials, tokens or customer data in public issues.
