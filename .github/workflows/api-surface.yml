@@ -1,0 +1,56 @@
+name: API surface
+
+# The version follows the public TypeScript surface of the package, not only the
+# contract: a contract change that is compatible over HTTP can still break the
+# callers of the generated client. This compares the surface built from the pull
+# request with the one published on npm for the version of the base branch and
+# fails when the version goes up less than that change needs (major, minor or
+# none). A larger bump is allowed. It is a required check of `main`, so the
+# automated `contract-sync` pull request cannot merge an insufficient bump.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-surface-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  surface:
+    name: Public API surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      # No install scripts: nothing in the toolchain needs them.
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build
+
+      # The base branch's copy of the script judges the pull request, when it has
+      # one: a pull request cannot relax the rules it is checked with.
+      - name: Compare the surface with the published base version
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          base_version=$(git show "origin/$BASE_REF:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          script=scripts/api-surface.mjs
+          if git show "origin/$BASE_REF:$script" > scripts/.api-surface-base.mjs 2> /dev/null; then
+            script=scripts/.api-surface-base.mjs
+          fi
+          status=0
+          node "$script" check --base "$base_version" > "$RUNNER_TEMP/surface.md" || status=$?
+          cat "$RUNNER_TEMP/surface.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/surface.md"
+          exit "$status"

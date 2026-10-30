@@ -51,6 +51,9 @@ jobs:
 
       - run: npm test
 
+      # The script that sets the version from the public API surface (api-surface.yml).
+      - run: npm run test:scripts
+
       - run: npm run examples:check
 
       - name: Load the package as a consumer would

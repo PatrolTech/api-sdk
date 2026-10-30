@@ -52,10 +52,12 @@
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json && node -e \"require('node:fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }))\"",
     "test": "vitest run",
+    "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "examples:check": "tsc -p tsconfig.examples.json",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "api-surface": "node scripts/api-surface.mjs"
   },
   "devDependencies": {
     "orval": "8.43.0",
