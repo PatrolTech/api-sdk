@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import { createApiClient, getRouteRounds, sdkFetch, updateLocation } from './index';
 
@@ -38,6 +40,11 @@ describe('path parameters cannot reach another endpoint', () => {
   });
 
   it.each([
+    '@evil.example/x',
+    '.evil.example/x',
+    '//evil.example/x',
+    'api/x',
+    '',
     '/api/x/../admin',
     '/api/%2e%2E/admin',
     '/api/.%2e/admin',
@@ -49,5 +56,37 @@ describe('path parameters cannot reach another endpoint', () => {
 
     await expect(sdkFetch(path, client.init())).rejects.toThrow(TypeError);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('redirects', () => {
+  it('passes redirect: error to fetch unless the caller asks otherwise', async () => {
+    const { client, fetchImpl } = clientWithFetch();
+
+    await sdkFetch('/api/x', client.init());
+    await sdkFetch('/api/x', client.init({ redirect: 'follow' }));
+
+    expect(fetchImpl.mock.calls[0][1].redirect).toBe('error');
+    expect(fetchImpl.mock.calls[1][1].redirect).toBe('follow');
+  });
+
+  it('a real 307 fails and never reaches the target with the body', async () => {
+    const reached: string[] = [];
+    const server = createServer((request, response) => {
+      reached.push(request.url ?? '');
+      response.writeHead(307, { location: '/target' }).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const client = createApiClient({ baseUrl: `http://127.0.0.1:${port}` });
+
+    try {
+      await expect(
+        sdkFetch('/api/token', client.init({ method: 'POST', body: 'refresh_token=secret' }))
+      ).rejects.toThrow(TypeError);
+      expect(reached).toEqual(['/api/token']);
+    } finally {
+      server.close();
+    }
   });
 });

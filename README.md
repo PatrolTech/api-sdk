@@ -68,6 +68,7 @@ See [`examples/quick-start.ts`](./examples/quick-start.ts).
 - A non-2xx response throws an `ApiError` with `status`, `message` and the response body in `data` (its type is exported as `ApiErrorBody`). Checking `response.status === 200` only narrows the TypeScript type.
 - A `423` for a suspended organization also calls `onSuspended(body)` if you configured it.
 - Path parameters are percent-encoded (`x/details` stays one segment), and an id that is exactly `.` or `..` is refused with a `TypeError` before any request, so untrusted input cannot reach another endpoint with your token.
+- Redirects are not followed: a 3xx rejects with a `TypeError`, so a redirect cannot carry custom headers or a request body to another host. Pass `redirect: 'follow'` on the call if you expect one. A path that does not start with a single `/` is also refused with a `TypeError`.
 
 ### One configuration per request
 

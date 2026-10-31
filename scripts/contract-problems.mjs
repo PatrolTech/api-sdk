@@ -3,13 +3,14 @@
 // PatrolTech's internal SDK keeps a copy of this file: a fix goes to both.
 
 const SAFE_NAME = /^[A-Za-z0-9_\-/{}.]+$/;
+const SAFE_PATH = /^\/[A-Za-z0-9_\-/{}.]*$/;
 const SAFE_MEDIA_TYPE = /^[A-Za-z0-9.+\-*]+\/[A-Za-z0-9.+\-*]+$/;
 const METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
 
 /**
  * The problems of the contract, empty when it is safe: paths, operationIds and
- * parameter names only use [A-Za-z0-9_\-/{}.], media types are `type/subtype` and
- * every $ref points inside the document.
+ * parameter names only use [A-Za-z0-9_\-/{}.], paths start with `/`, media types
+ * are `type/subtype` and every $ref points inside the document.
  */
 export function contractProblems(spec) {
   const problems = [];
@@ -57,7 +58,7 @@ export function contractProblems(spec) {
 
   for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
     const at = JSON.stringify(path);
-    check('path', path, SAFE_NAME, at);
+    check('path', path, SAFE_PATH, at);
     const item = resolve(pathItem) ?? {};
     checkParameters(item.parameters, at);
     for (const [method, operation] of Object.entries(item)) {
