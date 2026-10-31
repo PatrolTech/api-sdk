@@ -92,13 +92,16 @@ function resolveDefaultHeaders(cfg: ApiSdkConfig): Record<string, string> {
  * URL parsing resolves them (also as `%2e`). Refusing them, plus backslashes and
  * control characters that URL parsing rewrites or drops, keeps an untrusted id
  * (`..`) from sending the caller's token to another endpoint of the API.
+ * The path is appended to the base URL, so it must also start with one `/`:
+ * `@evil.example/x` or `.evil.example/x` would change the host that gets the token.
  */
 function assertSafePath(url: string): void {
   const path = url.split(/[?#]/, 1)[0];
   const hasDotSegment = path
     .split('/')
     .some((segment) => ['.', '..'].includes(segment.toLowerCase().replace(/%2e/g, '.')));
-  if (hasDotSegment || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) {
+  const isRooted = path.startsWith('/') && !path.startsWith('//');
+  if (!isRooted || hasDotSegment || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) {
     throw new TypeError(`Refusing an unsafe request path: ${JSON.stringify(path)}`);
   }
 }
@@ -111,6 +114,9 @@ async function doFetch(url: string, options?: SdkRequestInit): Promise<Response>
   const authHeaders = skipSessionAuth ? {} : await buildAuthorizationHeader(cfg);
   const fullUrl = `${cfg.baseUrl ?? ''}${url}`;
   return fetchImpl(fullUrl, {
+    // A redirect to another host would keep custom headers and, on a 307, the body
+    // (a refresh token, a password). Callers that expect one can pass `redirect`.
+    redirect: 'error',
     ...requestInit,
     headers: {
       ...resolveDefaultHeaders(cfg),

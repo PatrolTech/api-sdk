@@ -71,6 +71,7 @@ describe('check-contract', () => {
 
   it.each([
     ['a path with a backtick', spec({ '/api/`+alert(1)+`': {} })],
+    ['a path that could change the host', spec({ '.evil.example/x': {} })],
     ['an operationId with code', spec({ '/a': { get: { operationId: 'x(){}//' } } })],
     ['a parameter with quotes', spec({ '/a': { get: { parameters: [{ name: "a'b" }] } } })],
     [
